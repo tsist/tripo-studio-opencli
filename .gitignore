@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.tripo-studio/
+.codex-downloads/
+node_modules/
+dist/
+ledger_test_*/
+tests/integration-tests/
+*.blend*
+*.fbx
+*.glb
+*.gltf
+*.env
+*.clixml
+*secret*
+*token*

@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {classifyBridgeExportCaptures as classify} from '../skills/tripo-studio-opencli/scripts/tripo_bridge_ui.mjs';
+const project='00000001-0000-4000-8000-000000000001';
+const params={project_id:project,format:'fbx',fbx_preset:'blender',texture_size:8192,texture_packaging:'embedded',with_animation:false,enable_bake_animation:false};
+const row={endpoint:'/v2/studio/operation/export',method:'POST',request_id:'synthetic-post',request:params,
+ capture_complete:true,http:200,response:{code:0,operator_id:'00000002-0000-4000-8000-000000000002'}};
+let tests=0;
+assert.throws(()=>classify([{endpoint:row.endpoint,request_id:'missing-method'}],project));tests++;
+assert.equal(classify([],project).status,'pending');tests++;
+assert.equal(classify([{endpoint:row.endpoint,method:'OPTIONS',request_id:'preflight'}],project).status,'pending');tests++;
+const preflight={endpoint:row.endpoint,method:'OPTIONS',request_id:'synthetic-preflight'};
+assert.equal(classify([preflight,row],project).status,'receipt');tests++;
+assert.equal(classify([row,row],project).post_requests,1);tests++;
+assert.throws(()=>classify([row,{...row,request_id:'second-post'}],project),/Multiple/);tests++;
+assert.throws(()=>classify([{...row,request:{...params,texture_size:4096}}],project),/parameters/);tests++;
+assert.throws(()=>classify([{...row,response:{code:0}}],project),/UUID/);tests++;
+assert.throws(()=>classify([{...row,http:500}],project),/rejected/);tests++;
+assert.equal(classify([{...row,capture_complete:false}],project).status,'pending');tests++;
+assert.throws(()=>classify([{...row,request:{...params,project_id:'00000003-0000-4000-8000-000000000003'}}],project),/parameters/);tests++;
+console.log(JSON.stringify({ok:true,tests,network:false}));

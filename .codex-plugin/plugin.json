@@ -1,0 +1,15 @@
+{
+  "name": "tripo-studio-opencli",
+  "version": "0.1.0",
+  "description": "Tripo Studio browser workflows with budget gates and Blender handoff.",
+  "author": {"name": "tsist"},
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tripo Studio OpenCLI",
+    "shortDescription": "Tripo网页生成与Blender交接",
+    "longDescription": "Skills-only plugin using an existing OpenCLI Browser Bridge and separately installed dependencies.",
+    "developerName": "tsist",
+    "category": "Productivity",
+    "defaultPrompt": "使用 Tripo Studio 技能，先核对已有浏览器连接、地区、来源和本次具体预算，再准备生成或 Blender 交接。"
+  }
+}

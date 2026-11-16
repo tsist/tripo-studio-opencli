@@ -1,0 +1,23 @@
+name: Offline safety checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -B -m unittest discover -s tests -p 'test_*.py'
+      - shell: pwsh
+        run: |
+          $env:TRIPO_LEDGER_PYTHON = (Get-Command python).Source
+          node tests/test_bridge_rules.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/test_receipts.mjs
+          exit $LASTEXITCODE

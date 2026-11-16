@@ -1,0 +1,9 @@
+# 预览、应用和动画
+
+预览只记preview_ready/asset_applied=false。保存step绑定精确project/source/candidate和原页context；页面、源operator或候选变化时拒绝，不重新生成恢复。UV应用以previous/current operator的精确身份验证。重绘保存缺可核费用契约，自动执行继续禁用，prepare明确execution_blocked。
+
+预览页不能在finally被ephemeral清理，不能为恢复丢弃未保存候选。原页允许时重新观察，不创建替代页。上传风格图属于外发输入，需要对应授权。
+
+rigging成功后回读type，人形与四足分别处理。动画卡name映射到已完成retarget operator_id；服务端animations需要operator ID，不能发空数组或直接发name。无ID、歧义或重复先停。with_animation+明确names+bake=false为已验动作导出配方；enable_bake_animation只静态化当前姿态。
+
+文件检查实际Action、骨架、deform权重和多帧局部变化，不以有骨骼或下载成功判动画通过。旧失败不被新正确导出覆盖。

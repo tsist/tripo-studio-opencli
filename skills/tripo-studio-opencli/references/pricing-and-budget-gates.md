@@ -1,0 +1,9 @@
+# 费用与单次回执
+
+估价器是已核前端规则的本地副本，不是价格保证。提交前实时UI价格须精确等于本次估价；免费试用必须对本源有效且有明确授权。下载意图与操作次数独立计量，零积分也不免费用次数。
+
+P2非batch双/四输出按一次生成价格核算，回执逐项验证index/accepted与project/operator；partial接受或ID不全记unknown并保留已知ID，不按输出数乘价。SmartPoly四边实测40分支，不能用旧30估价提交。付费4K10与8K20的历史值仅用于已有具体合同分支，UI变化即停。
+
+UV/重绘候选生成与保存是不同step，预览成功不代表已应用。无价重绘保存自动入口及共享提交层均阻断，任何cap不能解锁。其他具体批准的无价路径内部占用不等于服务端上界；wallet下降不自动当作实际单笔扣费。超预留保留before/after/delta/reserved/not_attributed并halt。
+
+schema2账本使用跨进程锁，reserved→submitting→submitted→success逐阶段记录。未知回执/失败即停，历史halt不清。后续单次新授权可建独立受控尝试，但不能强制复用旧unknown或回收占用。泛泛“继续”不提高数字上限。
