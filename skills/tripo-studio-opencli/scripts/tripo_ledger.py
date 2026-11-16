@@ -932,6 +932,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # JSON is a UTF-8 protocol even when the caller has a legacy Windows locale.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args()
     dispatch = {

@@ -418,6 +418,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    # Match subprocess consumers' explicit UTF-8 decoding on every Windows locale.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args()
     if getattr(args,'prepare_only',False) and getattr(args,'execute_spend',False):parser.error('--prepare-only and --execute-spend are mutually exclusive')

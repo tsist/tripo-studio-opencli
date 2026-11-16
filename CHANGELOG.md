@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- 修复GitHub干净Windows环境中，Bridge调用账本因默认charmap无法输出中文JSON的问题。
+- 账本和driver的CLI输出显式UTF-8，新增强制ASCII父环境的2项回归。
+- 原0.1.0及其CI失败记录保留，预算和云调用保护不变。
+
 ## 0.1.0
 
 - 首次公开受限预览：自研OpenCLI适配器、代理技能和本地脚本。

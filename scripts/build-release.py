@@ -27,7 +27,7 @@ archive('skill',skill_items,'tripo-studio-opencli')
 archive('plugin',[(p,p.relative_to(ROOT)) for p in files if p.relative_to(ROOT).parts[0] not in {'tests','.github'}],'tripo-studio-opencli')
 archive('adapters',[(p,p.relative_to(ROOT/'adapters/tripo-studio')) for p in files if p.is_relative_to(ROOT/'adapters/tripo-studio')]+[(ROOT/'LICENSE',Path('LICENSE'))],'tripo-studio')
 checks=[]
-for p in sorted(DIST.glob('*.zip')):
+for p in sorted(DIST.glob(f'tripo-studio-opencli-{VERSION}-*.zip')):
     with zipfile.ZipFile(p) as z:
         assert z.testzip() is None
         assert all(not name.startswith('/') and '..' not in Path(name).parts for name in z.namelist())
