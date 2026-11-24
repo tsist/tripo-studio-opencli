@@ -1,0 +1,5 @@
+interface:
+  display_name: "Tripo Studio OpenCLI"
+  short_description: "用 OpenCLI 驱动 Tripo Studio 网页生成、后处理、导出与官方 Bridge 交接"
+  default_prompt: "先做零消耗预检与算力估算，获批锁账后执行 Tripo Studio 生成、后处理、导出或 Bridge 交接，并带齐清单与 SHA 交给建模部门。"
+  default_prompt: "Use $tripo-studio-opencli for this Blender workflow task."
