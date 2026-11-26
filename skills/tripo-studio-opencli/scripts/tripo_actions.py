@@ -3,7 +3,13 @@ from __future__ import annotations
 import json,re,time,uuid
 from pathlib import Path
 from typing import Any
-from tripo_pricing import estimate_generate,estimate_postprocess
+from tripo_pricing import (
+    estimate_generate,
+    estimate_postprocess,
+    is_h35_version,
+    resolve_hd_version,
+    resolve_lp_version,
+)
 from tripo_ui import StudioUI
 
 REFERENCE_IMAGE_SUFFIXES={'.jpg','.jpeg','.png','.webp'}
@@ -55,6 +61,8 @@ def validate_generate(args,require_inputs=True):
     if args.face_limit<0:raise ValueError('Face limit must be nonnegative.')
     if args.tier=='smartmesh' and (args.generate_parts or args.smart_poly or args.pbr or args.no_texture):
         raise ValueError('These HD options have no mapped Smart Mesh controls; do not silently ignore them.')
+    if args.tier=='hd' and is_h35_version(args.hd_version) and args.quad:
+        raise ValueError('H3.5 Preview (v3.5-20261108) only supports triangle topology; use --tier smartmesh --quad or --hd-version v3.1-20260211 for quad.')
     if args.tier=='hd' and args.generate_parts:
         # public-workspace.js forces triangle topology and turns texture off when
         # 分部件生成 is enabled.  Reject conflicting explicit requests rather
@@ -160,6 +168,8 @@ def finish_operators(d,args,receipt,verify=None):
     return {'ok':True,'receipt':receipt,'progress':results,'credits_used':None,'actual_credit_debit':'not_attributed',**verified}
 
 def generate(d,args):
+    args.hd_version=resolve_hd_version(getattr(args,'hd_version',None),getattr(args,'region','cn'))
+    args.lp_version=resolve_lp_version(getattr(args,'lp_version',None))
     validate_generate(args,require_inputs=args.execute_spend or args.prepare_upload or not args.prepare_only)
     d._ensure_daemon(args.profile)
     pf=d._fetch_preflight(args.profile,args.region);bal=pf['balance']
@@ -167,8 +177,9 @@ def generate(d,args):
         batch_count=max(1,len(args.images)) if args.mode=='batch' else 1,variations=args.variations,quad=args.quad,texture=not args.no_texture,
         pbr=args.pbr,texture_quality=args.texture_quality,geometry_quality=args.geometry_quality,generate_parts=args.generate_parts,
         smart_poly=args.smart_poly,smart_mesh_p2_trial=int(bal.get('smart_mesh_p2_trial',0)),ultra_texture_trial=int(pf['quota'].get('ultra_texture_trial',0)))
+    resolved_models={'region':args.region,'tier':args.tier,'hd_version':args.hd_version,'lp_version':args.lp_version}
     if not args.prepare_only and not args.execute_spend:
-        return {'ok':True,'dry_run':True,'preflight':pf,'estimate':est.to_dict()}
+        return {'ok':True,'dry_run':True,'resolved_models':resolved_models,'preflight':pf,'estimate':est.to_dict()}
     if args.execute_spend:
         require_identity(args)
         if int(bal.get('credit_balance',0))<est.net_credits:raise RuntimeError('Insufficient Studio credits.')
@@ -185,16 +196,16 @@ def generate(d,args):
             ui.upload_inputs(args)
             ui.prepare_generate(args)
         observed=ui.verify_generate(args,require_inputs=args.execute_spend or args.prepare_upload)
-        price=exact_price(observed['submit']['text'],est.net_credits,d._parse_submit_credits)
+        price=exact_price(observed['submit']['text'],est.net_credits,d._parse_submit_credits,observed['submit'].get('credit_prop'))
         if args.prepare_only:
-            return {'ok':True,'prepared':True,'submitted':False,'uploaded':args.prepare_upload,'estimate':est.to_dict(),'live_price':price,'observed':observed,'actions':ui.actions}
+            return {'ok':True,'prepared':True,'submitted':False,'uploaded':args.prepare_upload,'resolved_models':resolved_models,'estimate':est.to_dict(),'live_price':price,'observed':observed,'actions':ui.actions}
         # OpenCLI find can reuse an old fingerprint after the price changes.
         # A fresh state snapshot rebuilds identities before locating the CTA.
         ui.command('state')
-        target=ui.one('button','生成模型',prefix=True)
+        target=ui.one_any('button',('生成模型','Generate'),prefix=True)
         # Recheck immediately before the only submission click.
         observed=ui.verify_generate(args,require_inputs=True)
-        exact_price(observed['submit']['text'],est.net_credits,d._parse_submit_credits)
+        exact_price(observed['submit']['text'],est.net_credits,d._parse_submit_credits,observed['submit'].get('credit_prop'))
         endpoints={'single':'image_to_model','multiview':'multiview_to_model','batch':'batch_image_to_model','text':'text_to_model'}
         count=(len(args.images) if args.mode=='batch' else 1)*args.variations
         context={'session':session,'page':d._BROWSER_PAGES.get((args.profile,session)),'profile':args.profile}

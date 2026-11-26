@@ -11,9 +11,20 @@ from typing import Any, Callable
 
 MODE_VALUES={'single':'imageToModel','multiview':'multiView','batch':'batchImages','text':'textToModel'}
 MODE_ICONS={'single':'add-image','multiview':'multi-view','batch':'images','text':'pen'}
-VISIBILITY={'shareable':'仅分享','private':'私有','public':'公开'}
+VISIBILITY={'shareable':('仅分享','Shareable'),'private':('私有','Private'),'public':('公开','Public')}
 FIELDS=['tab','mode','lpVersion','hdVersion','useSmartMeshV2','quad','faceLimit','modelFaceLimits','privateMode',
         'generateParts','smartPoly','texture','pbr','textureQuality','geometryQuality','delight','enableImageAutofix','modelCount','canUseMultiModel','supportsMultiModel','useSameFaceLimit']
+
+def _version_option_labels(tier: str, version: str) -> tuple[str, ...]:
+    if tier == 'smartmesh':
+        return ('P2.0', 'Tripo P2.0', 'Nexus v2.0') if '2.0' in version else ('P1.0', 'Tripo P1.0', 'Nexus v1.0')
+    short = version.split('-')[0]
+    if short.lower().startswith('v') and len(short) > 1:
+        h_label = 'H' + short[1:]
+        if short.lower() == 'v3.5':
+            return (h_label, short, 'Tripo ' + h_label)
+        return (short, h_label, 'Tripo ' + h_label)
+    return (short,)
 
 class StudioUI:
     def __init__(self, call: Callable[...,str], decode: Callable[[str],Any]):
@@ -37,14 +48,21 @@ class StudioUI:
             .map((e,nth)=>({nth,visible:visible(e),disabled:e.disabled===true||e.getAttribute('aria-disabled')==='true',label:label(e),checked:e.getAttribute("aria-checked")==="true"||e.checked===true}));
           const active=v=>Array.isArray(v)?v.some(active):(v&&typeof v==="object")?Object.values(v).some(active):v===true;
           const buttons=Array.from(document.querySelectorAll("button")).filter(visible);
-          const submit=buttons.find(e=>e.getAttribute("data-trace")?.includes("generate_model_button"))||buttons.find(e=>/^生成模型/.test(e.innerText.trim()));
+          const submit=buttons.find(e=>e.getAttribute("data-trace")?.includes("generate_model_button"))||buttons.find(e=>/^(生成模型|Generate)(\s|$)/.test(e.innerText.trim()));
+          const activeCredits=(()=>{
+            if(!submit)return null;
+            const clone=submit.cloneNode(true);
+            clone.querySelectorAll(".line-through,del,s").forEach(n=>n.remove());
+            const nums=(clone.innerText||"").replace(/\s+/g," ").trim().split(" ").filter(t=>/^\d+$/.test(t)).map(Number);
+            return nums.length?nums[nums.length-1]:null;
+          })();
           return {url:location.origin+location.pathname,state,controls,
             prompt:st?.textToModel?.prompt||"",t_pose:st?.textToModel?.t_pose,
             image_ready:Boolean(st?.imageToModel?.key),
             multiview_ready:Array.isArray(st?.multiViewImages)?[0,1,3,2].map(i=>Boolean(st.multiViewImages[i]?.key||st.multiViewImages[i]?.image?.key)):[],
             batch_ready:Array.isArray(st?.batchImages)?st.batchImages.filter(e=>Boolean(e?.key)).length:0,
             uploading:active(st?.imageToModelUploading)||active(st?.multiViewUploading)||active(st?.batchUploading)||active(st?.batchImagesUploading),
-            submit:submit?{text:submit.innerText.trim(),disabled:submit.disabled,trace:submit.getAttribute("data-trace")}:null,
+            submit:submit?{text:submit.innerText.trim(),disabled:submit.disabled,trace:submit.getAttribute("data-trace"),credit_prop:activeCredits}:null,
             dialogs:Array.from(document.querySelectorAll('[role="dialog"][data-state="open"]')).filter(visible).map(e=>e.innerText.slice(0,2500))};
         })()'''.replace('FIELDS_PLACEHOLDER',json.dumps(FIELDS))
         return self.command('eval',js)
@@ -71,8 +89,17 @@ class StudioUI:
             raise RuntimeError(f'Expected one live control: css={css!r}, text={text!r}; matches={len(entries)}')
         return entries[0]
 
+    def one_any(self, css: str, texts: tuple[str, ...], prefix: bool=False) -> dict:
+        entries=self.find(css)
+        norm=lambda s:re.sub(r'\s+',' ',s).strip()
+        wanted=[norm(t) for t in texts]
+        matched=[e for e in entries if any(norm(e.get('text','')).startswith(w) if prefix else norm(e.get('text',''))==w for w in wanted)]
+        if len(matched)!=1:
+            raise RuntimeError(f'Expected one live control: css={css!r}, texts={texts!r}; matches={len(matched)}')
+        return matched[0]
+
     def click(self, entry: dict) -> dict:
-        if re.match(r'^(生成模型|开始拆分|生成贴图|生成PBR|自动绑定|生成 UV|开始补全)',entry.get('text','').strip()):
+        if re.match(r'^(生成模型|Generate(\s|$)|开始拆分|生成贴图|生成PBR|自动绑定|生成 UV|开始补全)',entry.get('text','').strip()):
             raise RuntimeError('Form preparation cannot click a submit control.')
         result=self.command('click',str(entry['ref']))
         if not result.get('clicked'):
@@ -90,7 +117,7 @@ class StudioUI:
     def set_engine(self, tier: str) -> None:
         self.close_dialog();want='low_poly' if tier=='smartmesh' else 'high_detail'
         if self.observe()['state'].get('tab')!=want:
-            self.click(self.one('button','智能网格' if tier=='smartmesh' else '高精度模型'))
+            self.click(self.one_any('button',('智能网格','Smart Mesh') if tier=='smartmesh' else ('高精度模型','HD Model')))
         self.expect(lambda s:s['state'].get('tab')==want,f'engine {tier}')
 
     def set_mode(self, mode: str) -> None:
@@ -102,39 +129,39 @@ class StudioUI:
     def set_visibility(self, visibility: str) -> None:
         self.close_dialog()
         if self.observe()['state'].get('privateMode')!=visibility:
-            options=set(VISIBILITY.values())
+            options={label for labels in VISIBILITY.values() for label in labels}
             boxes=[e for e in self.find('button[role="combobox"]') if e.get('text','').strip() in options]
             if len(boxes)!=1:raise RuntimeError('Privacy combobox not uniquely identified.')
-            self.click(boxes[0]);self.click(self.one('[role="option"]',VISIBILITY[visibility],prefix=True))
+            self.click(boxes[0]);self.click(self.one_any('[role="option"]',VISIBILITY[visibility],prefix=True))
         self.expect(lambda s:s['state'].get('privateMode')==visibility,f'privacy {visibility}')
 
     def set_version(self, tier: str, version: str) -> None:
         field='lpVersion' if tier=='smartmesh' else 'hdVersion'
         if self.observe()['state'].get(field)==version:return
-        boxes=[e for e in self.find('button[role="combobox"]') if re.match(r'^(P[12]\.0|v[0-9])',e.get('text','').strip())]
+        boxes=[e for e in self.find('button[role="combobox"]') if re.match(r'^(P[12]\.0|H[0-9]|v[0-9]|Tripo\s+[HP])',e.get('text','').strip())]
         if len(boxes)!=1:raise RuntimeError('Model-version combobox not uniquely identified.')
         self.click(boxes[0])
-        label=('P2.0' if '2.0' in version else 'P1.0') if tier=='smartmesh' else version.split('-')[0]
-        self.click(self.one('[role="option"]',label,prefix=True))
+        self.click(self.one_any('[role="option"]',_version_option_labels(tier,version),prefix=True))
         self.expect(lambda s:s['state'].get(field)==version,f'model version {version}')
 
     def open_general(self, tier: str) -> None:
-        self.close_dialog();label='拓扑' if tier=='smartmesh' else '几何与贴图'
-        self.click(self.one('[aria-haspopup="dialog"]',label))
-        self.expect(lambda s:bool(s['dialogs']),f'{label} dialog')
+        self.close_dialog();labels=('拓扑','Topology') if tier=='smartmesh' else ('几何与贴图','Geometry & Texture')
+        self.click(self.one_any('[aria-haspopup="dialog"]',labels,prefix=True))
+        self.expect(lambda s:bool(s['dialogs']),f'{labels[0]} dialog')
 
-    def set_switch(self, label: str, wanted: bool, field: str|None=None) -> None:
+    def set_switch(self, label: str|tuple[str,...], wanted: bool, field: str|None=None) -> None:
+        labels=(label,) if isinstance(label,str) else label
         observed=self.observe()
-        matches=[c for c in observed['controls'] if c['visible'] and label in c['label']]
-        if len(matches)!=1:raise RuntimeError(f'Switch label not unique: {label}; visible={[c["label"] for c in observed["controls"] if c["visible"]]}')
+        matches=[c for c in observed['controls'] if c['visible'] and any(tok in c['label'] for tok in labels)]
+        if len(matches)!=1:raise RuntimeError(f'Switch label not unique: {labels}; visible={[c["label"] for c in observed["controls"] if c["visible"]]}')
         c=matches[0]
         if c['checked']!=wanted:
-            if c.get('disabled'):raise ValueError(f'Studio disabled this option for the current source/mode: {label}; no click.')
+            if c.get('disabled'):raise ValueError(f'Studio disabled this option for the current source/mode: {labels}; no click.')
             entries=[e for e in self.find('button[role=switch],input[type=checkbox]') if e['nth']==c['nth']]
-            if len(entries)!=1:raise RuntimeError(f'Switch identity changed: {label}')
+            if len(entries)!=1:raise RuntimeError(f'Switch identity changed: {labels}')
             self.click(entries[0])
-        if field:self.expect(lambda s:s['state'].get(field)==wanted,f'{label}={wanted}')
-        else:self.expect(lambda s:any(x['visible'] and label in x['label'] and x['checked']==wanted for x in s['controls']),f'{label}={wanted}')
+        if field:self.expect(lambda s:s['state'].get(field)==wanted,f'{labels[0]}={wanted}')
+        else:self.expect(lambda s:any(x['visible'] and any(tok in x['label'] for tok in labels) and x['checked']==wanted for x in s['controls']),f'{labels[0]}={wanted}')
 
     def set_hd_smart_poly(self, wanted: bool) -> None:
         """Set HD Smart Poly only through the live structured switch.
@@ -182,7 +209,7 @@ class StudioUI:
         self.set_visibility(args.visibility)
         # Parts changes reset geometry/topology/face defaults. Apply it before
         # the general panel and the final requested face limit.
-        if args.tier=='hd':self.set_switch('分部件生成',args.generate_parts,'generateParts')
+        if args.tier=='hd':self.set_switch(('分部件生成','Generate Parts'),args.generate_parts,'generateParts')
         if args.tier=='smartmesh':
             if self.observe()['state'].get('supportsMultiModel'):
                 self.click(self.one('button[value="'+str(args.variations)+'"]',str(args.variations)))
@@ -191,14 +218,15 @@ class StudioUI:
         elif args.variations!=1:
             raise ValueError('High Detail has no verified variation-count control; use batch inputs or variations=1.')
         self.open_general(args.tier)
-        if args.tier=='smartmesh' and args.variations>1:self.set_switch('使用相同面数',True,'useSameFaceLimit')
+        if args.tier=='smartmesh' and args.variations>1:self.set_switch(('使用相同面数','Use Same Face Limit'),True,'useSameFaceLimit')
         if args.tier=='hd':self.prepare_hd_options(args)
-        topology=self.one('[role="dialog"][data-state="open"] button[value="'+('quad' if args.quad else 'triangle')+'"]')
-        topology_attrs=self.command('get','attributes',str(topology['ref']))['value']
-        if 'disabled' in topology_attrs or topology_attrs.get('aria-disabled')=='true':
-            raise ValueError('Requested topology is disabled by the current Studio mode/version; no click or submit.')
-        self.click(topology)
-        self.expect(lambda s:s['state'].get('quad')==('quad' if args.quad else 'triangle'),'topology selection')
+        if not (args.tier=='hd' and args.hd_version.startswith('v3.5')):
+            topology=self.one('[role="dialog"][data-state="open"] button[value="'+('quad' if args.quad else 'triangle')+'"]')
+            topology_attrs=self.command('get','attributes',str(topology['ref']))['value']
+            if 'disabled' in topology_attrs or topology_attrs.get('aria-disabled')=='true':
+                raise ValueError('Requested topology is disabled by the current Studio mode/version; no click or submit.')
+            self.click(topology)
+            self.expect(lambda s:s['state'].get('quad')==('quad' if args.quad else 'triangle'),'topology selection')
         self.set_face_limit(args.face_limit,args.variations)
         # HD-only settings are configured after live control mapping, never Pinia writes.
         self.close_dialog()
@@ -208,7 +236,7 @@ class StudioUI:
             if not r.get('verified'):raise RuntimeError('Prompt input did not retain its value.')
             self.expect(lambda s:s['prompt']==args.prompt,'text prompt')
             if self.observe().get('t_pose')!=args.t_pose:
-                self.click(self.one('button','T-姿势'))
+                self.click(self.one_any('button',('T-姿势','T-Pose')))
             self.expect(lambda s:s.get('t_pose')==args.t_pose,'T-pose selection')
         return {'observed':self.observe(),'actions':self.actions}
 
@@ -253,7 +281,7 @@ class StudioUI:
             expected['modelCount']=args.variations
         else:
             expected.update(generateParts=args.generate_parts,smartPoly=args.smart_poly,texture=not args.no_texture)
-            if args.hd_version.startswith('v3.1'):expected['geometryQuality']=args.geometry_quality
+            if args.hd_version.startswith(('v3.1','v3.5')):expected['geometryQuality']=args.geometry_quality
             if not args.no_texture:expected.update(textureQuality=args.texture_quality,pbr=args.pbr)
         mismatches={k:{'wanted':v,'actual':st.get(k)} for k,v in expected.items() if st.get(k)!=v}
         if args.mode=='text' and (s['prompt']!=args.prompt or s.get('t_pose')!=args.t_pose):mismatches['text']='prompt or T-pose differs'
@@ -263,12 +291,12 @@ class StudioUI:
         return s
 
     def prepare_hd_options(self,args) -> None:
-        if args.hd_version.startswith('v3.1'):
-            self.set_switch('超清几何精度',args.geometry_quality=='detailed')
+        if args.hd_version.startswith(('v3.1','v3.5')):
+            self.set_switch(('超清几何精度','Ultra Geometry','Geometry Quality'),args.geometry_quality=='detailed')
             self.expect(lambda s:s['state'].get('geometryQuality')==args.geometry_quality,'geometry quality')
         elif args.geometry_quality!='detailed':
             raise ValueError('This HD version has no geometry-quality control; only the default/not-applicable setting is accepted.')
-        self.set_switch('贴图生成',not args.no_texture,'texture')
+        self.set_switch(('贴图生成','Texture'),not args.no_texture,'texture')
         if not args.no_texture:
             label={'standard':'2K','detailed':'4K','extreme':'8K'}[args.texture_quality]
             self.click(self.one('[role="dialog"][data-state="open"] button',label,prefix=True))

@@ -21,7 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from tripo_pricing import estimate_generate, estimate_postprocess
+from tripo_pricing import (
+    LATEST_LP_VERSION,
+    estimate_generate,
+    estimate_postprocess,
+    resolve_hd_version,
+    resolve_lp_version,
+)
 
 DEFAULT_RUNTIME_DIR = Path(os.environ.get("TRIPO_STUDIO_RUNTIME_DIR", str(Path.cwd() / ".tripo-studio")))
 DEFAULT_LEDGER_PATH = DEFAULT_RUNTIME_DIR / "ledger.json"
@@ -816,10 +822,13 @@ def cmd_status(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_estimate(args: argparse.Namespace) -> dict[str, Any]:
     if args.kind == "generate":
+        region = getattr(args, "region", None) or "global"
+        hd_version = resolve_hd_version(args.hd_version, region=region)
+        lp_version = resolve_lp_version(args.lp_version)
         est = estimate_generate(
             tier=args.tier,
-            hd_version=args.hd_version,
-            lp_version=args.lp_version,
+            hd_version=hd_version,
+            lp_version=lp_version,
             mode=args.mode,
             batch_count=args.batch_count,
             variations=args.variations,
@@ -833,6 +842,11 @@ def cmd_estimate(args: argparse.Namespace) -> dict[str, Any]:
             smart_mesh_p2_trial=args.smart_mesh_p2_trial,
             ultra_texture_trial=args.ultra_texture_trial,
         )
+        return {
+            "ok": True,
+            "resolved_models": {"region": region, "hd_version": hd_version, "lp_version": lp_version},
+            "estimate": est.to_dict(),
+        }
     else:
         est = estimate_postprocess(
             args.operation,
@@ -847,7 +861,7 @@ def cmd_estimate(args: argparse.Namespace) -> dict[str, Any]:
             upscaler_trial=args.upscaler_trial,
             brush_mode=args.brush_mode,
         )
-    return {"ok": True, "estimate": est.to_dict()}
+        return {"ok": True, "estimate": est.to_dict()}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -903,9 +917,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_est = sub.add_parser("estimate", help="Compute exact Studio credit estimate (0 network cost)")
     p_est.add_argument("--kind", required=True, choices=["generate", "postprocess"])
+    p_est.add_argument("--region", default=None, choices=["cn", "global"])
     p_est.add_argument("--tier", default="hd", choices=["hd", "smartmesh"])
-    p_est.add_argument("--hd-version", default="v3.1-20260211")
-    p_est.add_argument("--lp-version", default="Nexus-v2.0-20260801")
+    p_est.add_argument("--hd-version", default=None)
+    p_est.add_argument("--lp-version", default=LATEST_LP_VERSION)
     p_est.add_argument("--mode", default="single", choices=["single", "multiview", "batch", "text"])
     p_est.add_argument("--batch-count", type=int, default=1)
     p_est.add_argument('--variations',type=int,choices=[1,2,4],default=1)

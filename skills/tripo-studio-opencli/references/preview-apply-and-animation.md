@@ -25,13 +25,13 @@
 
 ```powershell
 # 智能 UV 确认保存（需先获得用户对无标价保存预留上限的明确授权）
-python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
+python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
   --operation smart-uv --project-id <project_id> `
   --task-id <task_id> --step-key uv_apply_01 `
   --apply-preview-step uv_prev_01 --unpriced-apply-cap <批准上限> --execute-spend
 
 # 提示词重绘保存目前做只读准备检查，待价格契约核清后启用提交
-python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
+python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
   --operation texture-edit --project-id <project_id> `
   --task-id <task_id> --step-key tex_apply_01 `
   --apply-preview-step tex_prev_01 --prepare-only
@@ -47,14 +47,14 @@ python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
 1. **自动绑定与回读**：执行 `postprocess --operation rigging --rig-type biped`（或 `animal`）。提交完成后回读项目详情，核实 `is_rigged` 为真且 `rigging.type` 匹配预期（服务端 `quadruped` 会归一化为 `animal`）。
 2. **选择动作卡片**：绑定就绪后，先用 `--prepare-only` 核对可见动作卡片名称：
    ```powershell
-   python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
+   python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
      --operation rigging --project-id <project_id> `
      --animation "<精确卡片名称>" --prepare-only
    ```
    已缓存动作直接做本地预览切换；需要云端重定向的新动作另立 `step-key`，带上用户批准的 `--retarget-credit-cap` 单次提交，完成后回读可导出的 `animation_name`。
 3. **导出带动作的 FBX**：使用 `--model-format fbx` 配合 `--with-animation` 和 `--animation-names <已完成动作名...>`。
    ```powershell
-   python scripts/tripo_studio_driver.py --profile un6amgxk export `
+   python scripts/tripo_studio_driver.py --profile <your-profile> export `
      --task-id <task_id> --step-key exp_anim_01 --project-id <project_id> `
      --model-format fbx --fbx-preset blender --texture-packaging embedded `
      --with-animation --animation-names "<动作名1>" --execute-spend

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "tripo-studio-opencli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Tripo Studio browser workflows with explicit budgets, single-attempt receipts and Blender handoff.",
   "author": {"name": "tsist"},
   "extensions": {"com.openai": {"interface": {

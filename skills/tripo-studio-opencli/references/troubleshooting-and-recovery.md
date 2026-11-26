@@ -25,13 +25,13 @@
 2. **原地恢复导出与下载**：只要原步骤已经产生导出操作或本地下载作业，直接沿用原任务、原 `step-key` 和原导出参数跑恢复命令，零重复建单：
    ```powershell
    # 先查本地已有下载作业；只有需要追查原云端操作时才会联系 Chrome
-   python scripts/tripo_studio_driver.py --profile un6amgxk export `
+   python scripts/tripo_studio_driver.py --profile <your-profile> export `
      --task-id <task_id> --step-key <原step_key> --project-id <project_id> `
      --model-format fbx --fbx-preset blender --texture-packaging embedded `
      --resume-export
 
    # 本地下载完成后，核对原操作、参数、文件魔数与 SHA-256 并写入/恢复 manifest.json
-   python scripts/tripo_studio_driver.py --profile un6amgxk export `
+   python scripts/tripo_studio_driver.py --profile <your-profile> export `
      --task-id <task_id> --step-key <原step_key> --project-id <project_id> `
      --model-format fbx --fbx-preset blender --texture-packaging embedded `
      --download-job <download_job_id>

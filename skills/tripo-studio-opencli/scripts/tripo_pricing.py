@@ -8,12 +8,89 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-# Exact `b3` pricing table observed in studio.tripo3d.com bundle `MCF2by1J.js`
+# Exact `b3` / `Dt` pricing table observed in studio.tripo3d.com (`CXyzmgTt.js`)
+# and studio.tripo3d.ai (`Qy9e8hGF.js` + `Ds7oivs-.js`, verified 2026-11-26)
+LATEST_HD_VERSION = "v3.5-20261108"        # Tripo H3.5 Preview (live default on studio.tripo3d.ai)
+CN_DEFAULT_HD_VERSION = "v3.1-20260211"    # Tripo H3.1 (live latest on studio.tripo3d.com)
+LATEST_LP_VERSION = "Nexus-v2.0-20260801"  # Tripo Smart Mesh P2.0 (live latest on CN & Global)
+LATEST_RIG_BIPED_VERSION = "v3.0-20260909" # Tripo Rigging v3.0 (live on Global & API)
+CN_RIG_BIPED_VERSION = "v1.0-20240301"     # Current CN web biped rigging version
+LATEST_RIG_ANIMAL_VERSION = "v2.5-20260210"
+
+_HD_VERSION_ALIASES: dict[str, str] = {
+    "latest": LATEST_HD_VERSION,
+    "h3.5": LATEST_HD_VERSION,
+    "v3.5": LATEST_HD_VERSION,
+    "h3.1": "v3.1-20260211",
+    "v3.1": "v3.1-20260211",
+    "h3.0": "v3.0-20250812",
+    "v3.0": "v3.0-20250812",
+    "h2.5": "v2.5-20250123",
+    "v2.5": "v2.5-20250123",
+}
+
+_LP_VERSION_ALIASES: dict[str, str] = {
+    "latest": LATEST_LP_VERSION,
+    "p2": LATEST_LP_VERSION,
+    "p2.0": LATEST_LP_VERSION,
+    "p1": "Nexus-v1.0-20260214",
+    "p1.0": "Nexus-v1.0-20260214",
+}
+
+_RIG_VERSION_ALIASES: dict[str, str] = {
+    "latest": LATEST_RIG_BIPED_VERSION,
+    "v3.0": LATEST_RIG_BIPED_VERSION,
+    "v2.5": LATEST_RIG_ANIMAL_VERSION,
+    "v2.0": "v2.0-20250506",
+    "v1.0": CN_RIG_BIPED_VERSION,
+}
+
+
+def default_hd_version(region: str = "global") -> str:
+    """Return latest live HD model version for the requested Studio region."""
+    return LATEST_HD_VERSION if region == "global" else CN_DEFAULT_HD_VERSION
+
+
+def resolve_hd_version(version: Optional[str], region: str = "global") -> str:
+    if not version:
+        return default_hd_version(region)
+    key = version.strip().lower()
+    return _HD_VERSION_ALIASES.get(key, version.strip())
+
+
+def resolve_lp_version(version: Optional[str]) -> str:
+    if not version:
+        return LATEST_LP_VERSION
+    key = version.strip().lower()
+    return _LP_VERSION_ALIASES.get(key, version.strip())
+
+
+def default_rig_version(rig_type: str = "biped", region: str = "global") -> str:
+    if rig_type == "animal":
+        return LATEST_RIG_ANIMAL_VERSION
+    return LATEST_RIG_BIPED_VERSION if region == "global" else CN_RIG_BIPED_VERSION
+
+
+def resolve_rig_version(version: Optional[str], rig_type: str = "biped", region: str = "global") -> str:
+    if not version:
+        return default_rig_version(rig_type, region)
+    key = version.strip().lower()
+    if key == "latest":
+        return LATEST_RIG_ANIMAL_VERSION if rig_type == "animal" else LATEST_RIG_BIPED_VERSION
+    return _RIG_VERSION_ALIASES.get(key, version.strip())
+
+
+def is_h35_version(version: str) -> bool:
+    return version.strip().lower().startswith("v3.5")
+
+
 PRICING_B3: dict[str, int] = {
     "Completion": 5,
     "Export": 5,
     "FLUX_1_pro": 10,
     "GenerateBase": 15,
+    "GenerateBaseH35": 30,
+    "GenerateBaseH35Original": 100,
     "GenerateBaseNexus": 35,
     "GenerateBaseNexusV2": 100,
     "GenerateGenerateParts": 30,
@@ -63,8 +140,8 @@ class CreditEstimate:
 def estimate_generate(
     *,
     tier: str = "hd",  # "hd" | "smartmesh"
-    hd_version: str = "v3.1-20260211",
-    lp_version: str = "Nexus-v2.0-20260801",
+    hd_version: str = LATEST_HD_VERSION,
+    lp_version: str = LATEST_LP_VERSION,
     mode: str = "single",  # "single" | "multiview" | "batch" | "text"
     batch_count: int = 1,
     variations: int = 1,
@@ -78,7 +155,9 @@ def estimate_generate(
     smart_mesh_p2_trial: int = 0,
     ultra_texture_trial: int = 0,
 ) -> CreditEstimate:
-    """Estimate exact Studio generation credits matching frontend reactive `V`."""
+    """Estimate exact Studio generation credits matching frontend reactive formula."""
+    hd_version = resolve_hd_version(hd_version, region="global")
+    lp_version = resolve_lp_version(lp_version)
     if tier not in {"hd", "smartmesh"}:
         raise ValueError(f"Unsupported tier: {tier}")
     if mode not in {'single','multiview','batch','text'}:
@@ -103,8 +182,22 @@ def estimate_generate(
     total = 0
 
     if tier == "hd":
-        unit = PRICING_B3["GenerateWithTexture"] if texture else PRICING_B3["GenerateBase"]
-        breakdown.append(f"{'WithTexture' if texture else 'Base'}={unit}")
+        is_h35 = is_h35_version(hd_version)
+        if is_h35 and quad:
+            raise ValueError(
+                "H3.5 Preview (v3.5-20261108) only supports triangle topology; "
+                "use --tier smartmesh --quad or --hd-version v3.1-20260211 for quad."
+            )
+        if is_h35:
+            # Verified against live Ds7oivs-.js + Qy9e8hGF.js: H3.5 payable base is
+            # GenerateBaseH35 (30; original list 100) regardless of texture toggle.
+            unit = PRICING_B3["GenerateBaseH35"]
+            breakdown.append(
+                f"H3.5Base={unit}(orig={PRICING_B3['GenerateBaseH35Original']})"
+            )
+        else:
+            unit = PRICING_B3["GenerateWithTexture"] if texture else PRICING_B3["GenerateBase"]
+            breakdown.append(f"{'WithTexture' if texture else 'Base'}={unit}")
         if quad:
             unit += PRICING_B3["GenerateQuad"]
             breakdown.append(f"Quad={PRICING_B3['GenerateQuad']}")
@@ -125,10 +218,10 @@ def estimate_generate(
             breakdown.append(f"PBR={PRICING_B3['PBR']}")
 
         total = unit * count
-        if hd_version.startswith("v3.1") and geometry_quality == "detailed":
+        if (hd_version.startswith("v3.1") or is_h35) and geometry_quality == "detailed":
             geo_add = PRICING_B3["GenerateGeometryQualityDetailed"] * count
             total += geo_add
-            breakdown.append(f"v3.1GeoDetailed={geo_add}")
+            breakdown.append(f"{'H3.5' if is_h35 else 'v3.1'}GeoDetailed={geo_add}")
 
         if texture and texture_quality == "extreme" and ultra_texture_trial > 0 and not generate_parts:
             trial_discount = total // count

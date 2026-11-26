@@ -13,7 +13,7 @@
 
 ## 只读与导出 OpenCLI 适配器
 
-本地适配器位于 `~/.opencli\clis\tripo-studio\`，所有调用都复用当前已登录的 Chrome 会话，通过 `--profile` 指定配置档（默认 `un6amgxk`）。
+本地适配器位于 `~/.opencli\clis\tripo-studio\`，所有调用都复用当前已登录的 Chrome 会话，通过 `--profile` 或 `TRIPO_STUDIO_PROFILE` 指定配置档。
 
 | 命令 | 后端接口 | 用途与关键参数 |
 |---|---|---|
@@ -35,10 +35,12 @@
 - **批量图（`--mode batch`）**：传 `--images img1 img2 ...`，按输入张数计费。
 - **文本生成（`--mode text`）**：传 `--prompt "<描述>"`，角色类可加 `--t-pose`。
 
-档位选择：
+档位与默认模型版本（按目标站点实装最新版自动对齐）：
 
-- **Smart Mesh（`--tier smartmesh`）**：面数可控的拓扑优先生成，配合 `--quad` 和 `--face-limit`（四边面 500–25000，三角面 500–50000）。非批量模式下支持 `--variations 1|2|4` 同价出多档面数候选，后续优先导 FBX（Blender 预设）保留四边面。
-- **高细节（`--tier hd`）**：偏重造型与贴图细节，原生输出 GLB。切换精度或贴图选项时页面会重置面数，驱动会在最后写入面数并回读核对。
+- **Smart Mesh（`--tier smartmesh`）**：默认 **Tripo Smart Mesh P2.0（`Nexus-v2.0-20260801`）**，面数可控的拓扑优先生成，配合 `--quad` 和 `--face-limit`（四边面 500–25000，三角面 500–50000）。非批量模式下支持 `--variations 1|2|4` 同价出多档面数候选，后续优先导 FBX（Blender 预设）保留四边面。
+- **高细节（`--tier hd`）**：偏重造型与贴图细节，原生输出 GLB。
+  - `--region global`（`studio.tripo3d.ai`）：默认 **Tripo H3.5 Preview（`v3.5-20261108`）**（UI 显示 `H3.5 Preview`），仅支持三角面（`--quad` 拒绝静默切换），精细几何上限提升至 500 万面（标准 200 万面）。
+  - `--region cn`（`studio.tripo3d.com`）：当前实装最新为 **Tripo H3.1（`v3.1-20260211`）**，支持 `--hd-version h3.5` / `v3.5-20261108` 在国内站上线后无缝切换。切换精度或贴图选项时页面会重置面数，驱动会在最后写入面数并回读核对。
 
 ## 九个后处理模块（`/workspace/<route>/<project-id>`）
 
@@ -54,7 +56,7 @@
 | `texture-edit` | `/workspace/texture-edit` | `/v2/studio/operation/retexture_generate` | 驱动当前视图的提示词生成模式（`--prompt`）；3D 画笔绘制留给人工在网页操作 |
 | `texture-pbr` | `/workspace/texture-pbr` | `/v2/studio/operation/pbr_generate` | 补齐法线、粗糙度、金属度等 PBR 通道 |
 | `texture-upscale` | `/workspace/texture-upscale` | `/v2/studio/operation/texture_upscaler` | 贴图放大，默认标准 4K，加 `--upscale-extreme` 升至 8K |
-| `rigging` | `/workspace/rigging` | `/v2/studio/operation/rigging_model` | 自动绑定，`--rig-type biped\|animal`；绑定完成后另起一步选 `--animation` |
+| `rigging` | `/workspace/rigging` | `/v2/studio/operation/rigging_model` | 自动绑定，`--rig-type biped\|animal`；国际站人型默认 `v3.0-20260909`，国内站人型当前 `v1.0-20240301`，动物 `v2.5-20260210`（可传 `--rig-version`）；完成后另起一步选 `--animation` |
 
 ## 页面交互守则
 

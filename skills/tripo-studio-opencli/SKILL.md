@@ -2,7 +2,7 @@
 name: tripo-studio-opencli
 description: 通过 OpenCLI 驱动 Tripo Studio 网页端完成余额预检、预算锁账、三维模型生成、后处理、本地导出与官方 Bridge 到件提取。接到复杂有机体、雕塑造型的角色或高面数主体，需要先用 Studio 会员算力出候选再交给 Blender 建模部门时用它。
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Tripo Studio 网页生成与交接
@@ -19,9 +19,9 @@ metadata:
 $ctl = './blenderctl.ps1'
 & $ctl discover --product tripo-studio --actions
 
-opencli --profile un6amgxk tripo-studio balance --region cn -f json
-opencli --profile un6amgxk tripo-studio quota --region cn -f json
-python scripts/tripo_studio_driver.py --profile un6amgxk preflight
+opencli --profile <your-profile> tripo-studio balance --region cn -f json
+opencli --profile <your-profile> tripo-studio quota --region cn -f json
+python scripts/tripo_studio_driver.py --profile <your-profile> preflight
 ```
 
 国内会员默认走 `--region cn`（`https://studio.tripo3d.com`），用户明确点名国际站时再切 `--region global`（`https://studio.tripo3d.ai`）。认证全程复用用户打开的 Chrome 会话，Cookie、登录令牌和签名下载链接留在内存中处理，保持磁盘干净。
@@ -32,7 +32,7 @@ python scripts/tripo_studio_driver.py --profile un6amgxk preflight
 
 ```powershell
 # 干跑估算，零扣费
-python scripts/tripo_studio_driver.py --profile un6amgxk generate `
+python scripts/tripo_studio_driver.py --profile <your-profile> generate `
   --mode single --images "<参考图路径>" --tier smartmesh --quad --face-limit 10000
 
 # 按用户批准的额度初始化任务账本
@@ -48,12 +48,12 @@ python scripts/tripo_ledger.py init-task `
 
 按主体需求选好生成模式和档位，带上任务编号、唯一 `step-key` 和 `--execute-spend` 执行单次提交。
 
-- **结构规整、要保四边面的主体**：选 `--tier smartmesh --quad --face-limit <面数>`，后续优先导出 FBX 保留四边面拓扑。
-- **高细节雕塑或原画主体**：选 `--tier hd`，按需要配 `--texture-quality`、`--geometry-quality` 和 `--pbr`。
+- **结构规整、要保四边面的主体**：选 `--tier smartmesh --quad --face-limit <面数>`，默认使用最新 **Tripo Smart Mesh P2.0（`Nexus-v2.0-20260801`）**，支持原生四边面与多面数变体，后续优先导出 FBX 保留四边面拓扑。
+- **高细节雕塑或原画主体**：选 `--tier hd`，默认按目标站点自动选取最新实装版本——国际站（`--region global`）默认使用最新 **Tripo H3.5 Preview（`v3.5-20261108`，仅三角面、最高 500 万面）**，国内站（`--region cn`）当前实装最新为 **Tripo H3.1（`v3.1-20260211`）**（待国内站推送 H3.5 后可直接传 `--hd-version h3.5` / `v3.5-20261108` 启用）；按需要配 `--texture-quality`、`--geometry-quality` 和 `--pbr`。
 - **输入方式**：单图用 `--mode single --images`，四视图用 `--mode multiview --front --left --right --back`，批量图用 `--mode batch`，纯文字用 `--mode text --prompt`。
 
 ```powershell
-python scripts/tripo_studio_driver.py --profile un6amgxk generate `
+python scripts/tripo_studio_driver.py --profile <your-profile> generate `
   --mode single --images "<参考图路径>" `
   --tier smartmesh --quad --face-limit 10000 `
   --task-id <task_id> --step-key gen_01 --execute-spend
@@ -66,14 +66,14 @@ python scripts/tripo_studio_driver.py --profile un6amgxk generate `
 已有项目编号后，用 `postprocess` 跑拆件、补全、重拓扑、智能 UV、重做贴图、提示词重绘、PBR、贴图放大或自动绑定。
 
 ```powershell
-python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
+python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
   --operation rigging --rig-type biped `
   --project-id <project_id> --task-id <task_id> --step-key rig_01 --execute-spend
 ```
 
 - **两步预览保存**：`smart-uv` 和 `texture-edit` 先出预览，记录精确候选和原标签页信息；确认满意后再在原页面另起一步保存，保留原标签页直到保存确认完成。3D 画笔绘制留给人工在网页里完成，之后重新观察项目状态。
 - **贴图放大与重绘**：先跑 `--prepare-only` 核对当前页面控件与价格；提示词重绘预览按实测标价执行，保存操作留待价格契约核清后启用。
-- **动画与绑定**：绑定完成后回读 `rigging.type` 和 `is_rigged`；选定动作卡片另起一步并按批准上限记录。细则见 [预览、保存与动画](references/preview-apply-and-animation.md)。
+- **动画与绑定**：绑定默认按站点选用最新实装版本（国际站人型默认 **Rigging v3.0 `v3.0-20260909`**，国内站人型当前为 `v1.0-20240301`，四足动物为 `v2.5-20260210`，可用 `--rig-version` 显式指定）。绑定完成后回读 `rigging.type` 和 `is_rigged`；选定动作卡片另起一步并按批准上限记录。细则见 [预览、保存与动画](references/preview-apply-and-animation.md)。
 
 ### 第五步：导出到本地或用官方 Bridge 接回
 
@@ -81,7 +81,7 @@ python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
 
 - **本地归档与批处理交接（推荐）**：用 `export` 按批准的下载额度先发起导出并下载到任务目录，自动计算 SHA-256 并写入 `manifest.json`。静态四边面或带动作的模型优先用 `--model-format fbx --fbx-preset blender --texture-packaging embedded`；高细节带 PBR 贴图的静态模型可选 `--model-format gltf`。
   ```powershell
-  python scripts/tripo_studio_driver.py --profile un6amgxk export `
+  python scripts/tripo_studio_driver.py --profile <your-profile> export `
     --task-id <task_id> --step-key exp_01 --project-id <project_id> `
     --model-format fbx --fbx-preset blender --texture-packaging embedded `
     --execute-spend
@@ -109,7 +109,7 @@ python scripts/tripo_studio_driver.py --profile un6amgxk postprocess `
 
 接到上游前期参考部门给的去背正视图 `work/lantern/front.png`，要求先出低中面四边面候选供建模部门精修。
 
-1. **查入口并预检**：跑 `blenderctl.ps1 discover --product tripo-studio` 核对脚本路径，再执行 `opencli --profile un6amgxk tripo-studio balance --region cn -f json` 和 `preflight`，确认国内站已登录、余额充足。
+1. **查入口并预检**：跑 `blenderctl.ps1 discover --product tripo-studio` 核对脚本路径，再执行 `opencli --profile <your-profile> tripo-studio balance --region cn -f json` 和 `preflight`，确认国内站已登录、余额充足。
 2. **估价并请用户批预算**：干跑 `generate --mode single --images "work/lantern/front.png" --tier smartmesh --quad --face-limit 10000`，读出预估 100 积分（或 1 次 Smart Mesh 试用）加 1 次导出。报给用户获批后，跑 `tripo_ledger.py init-task --task-id lantern-v01 --budget-cap 100 --max-submissions 2 --download-cap 1 --region cn --note "lantern smartmesh"`。
 3. **单次生成**：带上 `--task-id lantern-v01 --step-key gen_01 --execute-spend` 提交生成，等操作完成并记下 `project_id` 和选中的变体 `operator_id`。
 4. **导出本地 FBX**：运行 `export --task-id lantern-v01 --step-key exp_01 --project-id <project_id> --model-format fbx --fbx-preset blender --texture-packaging embedded --execute-spend`，在任务目录拿到 `.fbx`、SHA-256 与 `manifest.json`。

@@ -1,6 +1,7 @@
 """Postprocess forms use normal controls; page evaluation only observes state."""
 import json,time
 from pathlib import Path
+from tripo_pricing import resolve_rig_version
 from tripo_ui import StudioUI
 
 class PostUI(StudioUI):
@@ -279,18 +280,26 @@ class PostUI(StudioUI):
             label={'coarse':'粗略','medium':'标准','fine':'精细'}[args.granularity]
             self.click(self.one('button',label,prefix=True))
         elif op=='retopology':
-            self.click(self.one('button[value="'+('triangle' if args.triangle else 'quad')+'"]'))
-            if self.observe()['state'].get('smartPoly')!=args.smart_poly:self.set_switch('P1.0',args.smart_poly,'smartPoly')
+            topology = 'triangle' if args.triangle else 'quad'
+            if s['state'].get('topology') != topology:
+                self.click(self.one(f'button[value="{topology}"]'))
+            current = self.expect(
+                lambda view: view['state'].get('topology') == topology
+                and (not args.smart_poly or view['state'].get('smartPolyDisabled') is False),
+                f'{topology} topology and requested Smart Mesh controls ready', timeout=25,
+            )
+            if current['state'].get('smartPoly') != args.smart_poly:
+                self.set_switch('P1.0', args.smart_poly, 'smartPoly')
             entry=self.one('input[type="text"]');result=self.command('fill',str(entry['ref']),str(args.face_limit))
             if not result.get('verified'):raise RuntimeError('Retopology face input rejected.')
             self.command('keys','Tab')
         elif op=='texture':return self.prepare_texture(args)
         elif op=='texture-upscale':self.click(self.one('button','8K' if args.upscale_extreme else '4K',prefix=True))
         elif op=='rigging':
-            wanted='v2.5-20260210' if args.rig_type=='animal' else 'v1.0-20240301'
+            wanted=resolve_rig_version(getattr(args,'rig_version',None),args.rig_type,getattr(args,'region','cn'))
             if self.observe()['state'].get('modelVersion')!=wanted:
                 self.click(self.one('button[role="combobox"]'))
-                self.click(self.one('[role="option"]','v2.5' if args.rig_type=='animal' else 'v1.0',prefix=True))
+                self.click(self.one('[role="option"]',wanted.split('-')[0],prefix=True))
         elif op=='texture-edit':
             if not args.prompt.strip():raise ValueError('Prompt-only texture editing needs --prompt.')
             self.click(self.one('button[data-trace="studio_cn.workspace_texture-edit.brush_mode_tab"]','生成模式'))
@@ -327,7 +336,7 @@ class PostUI(StudioUI):
                 if not s.get('base_ready'):raise RuntimeError('Texture base input is not ready.')
                 if s.get('uploading'):raise RuntimeError('Texture inputs are still uploading.')
         if op=='texture-upscale':expected={'upscaleTextureQuality':'extreme' if args.upscale_extreme else 'detailed'}
-        if op=='rigging':expected={'modelVersion':'v2.5-20260210' if args.rig_type=='animal' else 'v1.0-20240301'}
+        if op=='rigging':expected={'modelVersion':resolve_rig_version(getattr(args,'rig_version',None),args.rig_type,getattr(args,'region','cn'))}
         if op=='texture-edit':expected={'magicBrushType':'image','prompt':args.prompt}
         if op=='fill-parts':expected={'completionMode':'ai_completion'}
         wrong={k:{'wanted':v,'actual':st.get(k)} for k,v in expected.items() if st.get(k)!=v}

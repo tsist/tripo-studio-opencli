@@ -2,7 +2,7 @@
 
 通过真实浏览器操作 Tripo Studio 的自研 OpenCLI 适配器、Python 工作流和配套代理技能。支持生成、后处理、受预算约束的导出，以及与官方 Tripo Bridge 的 Blender 交接。此仓库同时提供技能包与 skills-only Codex 插件包；没有另造一个 Blender 接收器。
 
-**0.1.1 是受限预览版。** 已有 Windows、OpenCLI 1.8.7、Blender 5.2.1 的代表性实测；网页构建变化可能使操作被安全拒绝。服务成功、导入成功和模型艺术质量分别判断。项目与 Tripo、OpenCLI、Blender 官方无隶属关系。
+**0.2.0 是受限预览版。** 已有 Windows、OpenCLI 1.8.7、Blender 5.2.1 / 5.3.0 的代表性实测；网页构建变化可能使操作被安全拒绝。HD 模式按站点自动对齐实装最新模型（国际站默认 **H3.5 Preview `v3.5-20261108`**，国内站当前默认 **H3.1 `v3.1-20260211`**），Smart Mesh 默认 **P2.0 (`Nexus-v2.0-20260801`)**。服务成功、导入成功和模型艺术质量分别判断。项目与 Tripo、OpenCLI、Blender 官方无隶属关系。
 
 ## 内容
 

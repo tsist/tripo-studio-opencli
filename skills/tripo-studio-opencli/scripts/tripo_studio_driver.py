@@ -18,7 +18,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from tripo_pricing import estimate_generate, estimate_postprocess
+from tripo_pricing import (
+    LATEST_LP_VERSION,
+    estimate_generate,
+    estimate_postprocess,
+    resolve_hd_version,
+    resolve_lp_version,
+    resolve_rig_version,
+)
 
 DEFAULT_RUNTIME_DIR = Path(os.environ.get("TRIPO_STUDIO_RUNTIME_DIR", str(Path.cwd() / ".tripo-studio")))
 LEDGER_SCRIPT = Path(__file__).resolve().parent / "tripo_ledger.py"
@@ -245,12 +252,18 @@ def _ensure_daemon(profile: str) -> None:
 
 
 def _parse_submit_credits(btn_text: str) -> int | None:
-    """Extract live credit integer from submit button text (e.g. '生成模型 50' or '生成模型 100 0')."""
+    """Extract live payable credit integer from submit button text.
+
+    Handles plain buttons ('生成模型 50' -> 50), trial strikethrough ('生成模型 100 0' -> 0),
+    and H3.5 preview promo strikethrough ('Generate 60 130' -> 60).
+    """
     tokens = [int(tok) for tok in btn_text.replace("\n", " ").split() if tok.isdigit()]
     if not tokens:
         return None
-    # When trial strikethrough is shown (e.g. '生成模型 100 0'), the final digit is the effective price
-    return tokens[-1]
+    if len(tokens) == 1:
+        return tokens[0]
+    # Discounted/trial pairs always display original > effective payable price.
+    return min(tokens)
 
 
 def _poll_operator(profile: str, region: str, operator_id: str, timeout_sec: int) -> dict[str, Any]:
@@ -326,6 +339,11 @@ class StudioArgumentParser(argparse.ArgumentParser):
         parsed=super().parse_args(args,namespace)
         if hasattr(parsed,'runtime_dir') and getattr(parsed,'ledger',None) is None:
             parsed.ledger=str(Path(parsed.runtime_dir)/'ledger.json')
+        if getattr(parsed,'subcmd',None)=='generate':
+            parsed.hd_version=resolve_hd_version(parsed.hd_version,parsed.region)
+            parsed.lp_version=resolve_lp_version(parsed.lp_version)
+        if getattr(parsed,'subcmd',None)=='postprocess':
+            parsed.rig_version=resolve_rig_version(getattr(parsed,'rig_version',None),parsed.rig_type,parsed.region)
         return parsed
 
 
@@ -343,8 +361,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen = sub.add_parser("generate", help="Run dry-run estimate or execute Tripo Studio generation")
     p_gen.add_argument("--mode", required=True, choices=["single", "multiview", "batch", "text"])
     p_gen.add_argument("--tier", default="hd", choices=["hd", "smartmesh"])
-    p_gen.add_argument("--hd-version", default="v3.1-20260211")
-    p_gen.add_argument("--lp-version", default="Nexus-v2.0-20260801")
+    p_gen.add_argument(
+        "--hd-version",
+        default=None,
+        help="HD model version; defaults to region latest (global: v3.5-20261108 H3.5 Preview, cn: v3.1-20260211 H3.1; accepts aliases latest/h3.5/h3.1)",
+    )
+    p_gen.add_argument(
+        "--lp-version",
+        default=LATEST_LP_VERSION,
+        help="Smart Mesh model version; defaults to P2.0 (Nexus-v2.0-20260801; accepts aliases latest/p2/p1)",
+    )
     p_gen.add_argument("--quad", action="store_true")
     p_gen.add_argument("--face-limit", type=int, default=0)
     p_gen.add_argument("--variations", type=int, default=1, choices=[1, 2, 4])
@@ -380,6 +406,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument('--skip-upscaler-trial',action='store_true',help='Explicit paid 4K estimate when the live UI does not honor the reported trial; exact live price and approved budget still required')
     p_post.add_argument("--prompt", default="", help="Texture: select text input and fill its prompt; texture-edit: prompt generation mode")
     p_post.add_argument("--rig-type", default="biped", choices=["biped", "animal"])
+    p_post.add_argument(
+        "--rig-version",
+        default=None,
+        help="Rigging model version; defaults to region latest (global biped: v3.0-20260909, cn biped: v1.0-20240301, animal: v2.5-20260210)",
+    )
     p_post.add_argument("--brush-mode", action="store_true")
     p_post.add_argument("--task-id", default="")
     p_post.add_argument("--step-key", default="")

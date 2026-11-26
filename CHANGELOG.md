@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- 支持最新 **Tripo H3.5 Preview (`v3.5-20261108`)** 模型、实时计价公式（`GenerateBaseH35=30` / 原价 `100` + `detailed` 几何 `+15`）与仅三角面约束，国际站（`--region global`）默认自动使用 `v3.5-20261108`，国内站（`--region cn`）保持实装最新 `v3.1-20260211`（上线后可通过 `--hd-version h3.5` 无缝切换）。
+- 支持国际站最新 **Rigging v3.0 (`v3.0-20260909`)** 自动绑定（`--rig-version` 可显式指定），Smart Mesh 保持默认最新 **P2.0 (`Nexus-v2.0-20260801`)**。
+- 升级 `StudioUI` 支持中英双语控件标签（含 `H3.5 Preview` 下拉框与 `Generate` 按钮），并通过 DOM 去划线提取及 `min(tokens)` 兼容预览折扣划线价（如 `Generate 60 130`）与试用划线价（如 `生成模型 100 0`）。
+- 清理技能文档中残留的本机 profile 示例名，并新增 H3.5/P2.0/Rigging v3.0 计价与 UI 离线回归测试。
+
 ## 0.1.1
 
 - 修复GitHub干净Windows环境中，Bridge调用账本因默认charmap无法输出中文JSON的问题。
