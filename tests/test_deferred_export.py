@@ -219,7 +219,7 @@ class DeferredExportTests(unittest.TestCase):
             "--operator-id", "export-project-1", "--project-id", args.project_id,
         )
         downloaded = tripo_export.export(self.studio, args)
-        self.assertEqual(Path(downloaded["job"]["destination"]).parent, self.runtime / "batch")
+        self.assertEqual(Path(downloaded["job"]["destination"]).parent.resolve(), (self.runtime / "batch").resolve())
         self.assertEqual([action for action, _ in self.studio.events], ["export-url"])
         completed = tripo_export.export(self.studio, self.arguments(
             submit_only=False, execute_spend=False, source_operator_id="", download_job=downloaded["job"]["id"],
