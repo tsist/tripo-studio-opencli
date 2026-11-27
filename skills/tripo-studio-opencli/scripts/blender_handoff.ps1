@@ -15,7 +15,11 @@ param(
 
     [string]$ModelTag = "tripo-studio-web",
 
-    [switch]$SkipPreview
+    [switch]$SkipPreview,
+
+    [string]$DownloadManifest = "",
+
+    [string]$ExpectedDownloadManifestSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +38,7 @@ if (!(Test-Path -LiteralPath $BlenderCtl -PathType Leaf)) {
     throw "blenderctl.ps1 not found: $BlenderCtl"
 }
 if (!(Test-Path -LiteralPath $BlenderExe -PathType Leaf)) {
-    throw "Blender 5.2 binary not found: $BlenderExe"
+    throw "Blender binary not found: $BlenderExe"
 }
 
 $ResolvedInput = (Resolve-Path -LiteralPath $InputFile).Path
@@ -50,6 +54,52 @@ if ($Mode -eq "auto") {
 }
 
 $InputSha = (Get-FileHash -LiteralPath $ResolvedInput -Algorithm SHA256).Hash.ToLowerInvariant()
+$StudioExport = $null
+if ($DownloadManifest -or $ExpectedDownloadManifestSha256) {
+    if (!$DownloadManifest -or $ExpectedDownloadManifestSha256 -cnotmatch '^[a-f0-9]{64}$') {
+        throw "A Studio download receipt requires -DownloadManifest and its lowercase SHA-256."
+    }
+    $ManifestPath = (Resolve-Path -LiteralPath $DownloadManifest -ErrorAction Stop).Path
+    $ManifestBytes = [System.IO.File]::ReadAllBytes($ManifestPath)
+    $ManifestSha = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($ManifestBytes)).ToLowerInvariant()
+    if ($ManifestSha -cne $ExpectedDownloadManifestSha256) {
+        throw "Studio download manifest SHA-256 mismatch."
+    }
+    $Export = [System.Text.Encoding]::UTF8.GetString($ManifestBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
+    $Artifact = $Export.artifact
+    $ExpectedArtifactKind = if ($Mode -eq "fbx") { "FBX_BINARY" } else { "GLB" }
+    if ($Mode -eq "fbx" -and ($Ext -ne '.fbx' -or $Artifact.format -cne 'fbx')) {
+        throw "A Studio FBX receipt must identify a loose .fbx artifact in FBX format."
+    }
+    if (($Artifact.ok -isnot [bool]) -or !$Artifact.ok -or $Artifact.kind -cne $ExpectedArtifactKind -or
+        $Artifact.sha256 -cne $InputSha -or $Artifact.bytes -ne (Get-Item -LiteralPath $ResolvedInput).Length) {
+        throw "Studio download manifest does not identify these $ExpectedArtifactKind bytes."
+    }
+    if (!$Export.project_id -or !$Export.operator_id -or !$Export.download_job -or
+        ($ProjectId -and $ProjectId -cne $Export.project_id)) {
+        throw "Studio project, export operator or download job does not match the requested handoff."
+    }
+    $ProjectId = $Export.project_id
+    $StudioExport = @{
+        manifest_file = $ManifestPath
+        manifest_sha256 = $ManifestSha
+        project_id = $Export.project_id
+        operator_id = $Export.operator_id
+        download_job = $Export.download_job
+        format = $Artifact.format
+        packaging = $Artifact.packaging
+        local_sha256 = $InputSha
+    }
+    if ($Export.source_operator_id) {
+        if ($Export.source_operator_id -isnot [string] -or $Export.source_operator_id -cnotmatch '^[A-Za-z0-9-]{8,64}$') {
+            throw "Studio download manifest contains an invalid source operator ID."
+        }
+        $StudioExport["source_operator_id"] = $Export.source_operator_id
+        if ($Export.source_check -ceq 'studio_current_before_submit') {
+            $StudioExport["source_check"] = $Export.source_check
+        }
+    }
+}
 $Stem = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedInput)
 $HandoffDir = Join-Path $TaskDir "handoff"
 $JobsDir = Join-Path $TaskDir "blenderctl_jobs"
@@ -112,6 +162,8 @@ $Result = @{
     detected_tripo_named_addon_folders = $DetectedTripoAddonFolders
     bridge_compatibility = $BridgeCompatibility
 }
+
+if ($StudioExport) { $Result["studio_export"] = $StudioExport }
 
 if ($Mode -eq "glb") {
     $ParamsPath = Join-Path $HandoffDir "${Stem}_import_local.params.json"

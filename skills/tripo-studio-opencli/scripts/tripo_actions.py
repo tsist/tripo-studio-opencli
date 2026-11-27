@@ -14,6 +14,8 @@ from tripo_ui import StudioUI
 
 REFERENCE_IMAGE_SUFFIXES={'.jpg','.jpeg','.png','.webp'}
 REFERENCE_IMAGE_MAX_BYTES=20*1024*1024
+DEFERRED_POSTPROCESS = {'segmentation', 'fill-parts', 'retopology', 'texture', 'texture-pbr', 'texture-upscale'}
+ACTIVE_STEP_STATUSES = {'reserved', 'submitting', 'submitted', 'unknown'}
 
 def validate_reference_image(path):
     """Validate the local style reference before any UI/network action.
@@ -95,6 +97,7 @@ def reserve(d,args,estimate,metadata,downloads=0):
     state=d._ledger(Path(args.ledger),'status','--task-id',args.task_id)
     if state.get('schema_version',1)<2:raise RuntimeError('Execution requires a new schema-v2 task with explicit resource caps; old task history is retained.')
     if state.get('region')!=args.region:raise RuntimeError('Task ledger region differs from the requested Studio region.')
+    metadata = {**metadata, 'studio_profile': args.profile}
     cmd=['reserve','--task-id',args.task_id,'--step-key',args.step_key,'--operation',estimate.action,'--credits',str(estimate.net_credits),'--downloads',str(downloads),'--metadata-json',json.dumps(metadata,ensure_ascii=False)]
     if estimate.trial_used:cmd+=['--trial',estimate.trial_used,'--trial-count','1']
     return d._ledger(Path(args.ledger),*cmd)
@@ -111,14 +114,77 @@ def require_spend_contract(action):
         raise RuntimeError('Unverified texture-preview save charge: no verified price or service-side upper bound. Automatic save is blocked; --unpriced-apply-cap is only an internal reservation and cannot unlock it. Keep the recorded preview; no submit.')
 
 
+def deferred_wallet(steps, profile, balance):
+    """Compare this production batch's wallet exposure without billing individual steps."""
+    active_history = list(steps.values())
+    first = next((i for i, step in enumerate(active_history)
+                  if step.get('was_submitted') and (step.get('metadata') or {}).get('deferred_profile')), None)
+    if first is None:
+        return None
+    history = [step for step in active_history[first:] if step.get('was_submitted')]
+    for step in history:
+        metadata = step.get('metadata') or {}
+        if any(metadata.get(key, profile) != profile for key in ('deferred_profile', 'studio_profile', 'export_profile')):
+            raise RuntimeError('Steps in the same batch must use the original browser profile.')
+    baseline = history[0]['metadata'].get('preflight', {}).get('balance', {}).get('credit_balance')
+    if type(baseline) is not int or type(balance) is not int or min(baseline, balance) < 0:
+        raise RuntimeError('Cannot compare the recorded and current batch wallet balances.')
+    approved = sum(step['credits'] for step in history)
+    return {'wallet_before': baseline, 'wallet_now': balance,
+            'observed_net_decrease': baseline - balance, 'submitted_credit_ceiling': approved,
+            'actual_credit_debit': 'not_attributed'}
+
+
+def halt_batch_wallet(d, args, wallet, progress):
+    reason = 'Batch wallet decrease exceeds its recorded submissions.'
+    evidence = {'wallet': wallet, 'progress': progress}
+    d._ledger(Path(args.ledger), 'halt', '--task-id', args.task_id, '--reason', reason,
+              '--evidence-json', json.dumps(evidence, ensure_ascii=False))
+
+
+def check_queued_submission(d, args, balance):
+    state = d._ledger(Path(args.ledger), 'status', '--task-id', args.task_id)
+    if state.get('region') != args.region or state.get('schema_version', 1) < 2:
+        raise RuntimeError('Execution requires a schema-v2 task in the requested Studio region.')
+    bound_profile = state.get('studio_profile')
+    if (bound_profile and bound_profile != args.profile) or (getattr(args, 'submit_only', False) and not bound_profile):
+        raise RuntimeError('Use the Studio profile bound at init-task for this batch.')
+    if state.get('halted') or state.get('submitting') or state.get('unresolved_unknown'):
+        raise RuntimeError('Inspect the halted, submitting, or unknown ledger step before a new submission.')
+    steps = state['steps']
+    if getattr(args, 'step_key', None) in steps:
+        raise RuntimeError('This step key is already recorded. Inspect the existing receipt before proceeding.')
+    for step in steps.values():
+        metadata = step.get('metadata') or {}
+        evidence = step.get('evidence') or {}
+        if step.get('status') not in ACTIVE_STEP_STATUSES:
+            continue
+        project = getattr(args, 'project_id', None)
+        export_params = metadata.get('export_params') or {}
+        if project and (project in (evidence.get('project_ids') or []) or
+                        project in {step.get('project_id'), metadata.get('project_id'),
+                                    export_params.get('project_id')}):
+            raise RuntimeError('The requested project already has an unsettled operation in this batch.')
+    summary = deferred_wallet(steps, args.profile, balance)
+    if summary and summary['observed_net_decrease'] > summary['submitted_credit_ceiling']:
+        halt_batch_wallet(d, args, summary, {})
+        raise RuntimeError('Batch wallet decrease exceeds its recorded submissions. Reconcile the batch before spending.')
+    return summary
+
+
 def execute_ui(d,args,call,estimate,observed,submit_ref,endpoint,count,browser_context=None):
     require_spend_contract(estimate.action)
     from tripo_submit import SingleSubmission
+    preflight = getattr(args, '_before_preflight', None) or {}
+    args._batch_wallet = check_queued_submission(d, args, preflight.get('balance', {}).get('credit_balance'))
     barrier=getattr(d,'USE_RESOURCE_BARRIER',False)
     if barrier:
         from tripo_submit import arm_capture
         arm_capture(call,d._extract_json)
     metadata={'live_price':estimate.net_credits,'parameters':observed.get('state',{}),'expected_results':count,'preflight':getattr(args,'_before_preflight',None),**getattr(args,'_submission_metadata',{})}
+    if getattr(args, 'submit_only', False):
+        metadata.update(deferred_profile=args.profile, project_id=getattr(args, 'project_id', None),
+                        source_operator_id=getattr(args, 'source_operator_id', None))
     if metadata.get('price_evidence',{}).get('kind')=='unpriced_explicit_cap':metadata['live_price']=None
     reserve(d,args,estimate,metadata)
     last=['reserved']
@@ -145,19 +211,30 @@ def finish_operators(d,args,receipt,verify=None):
     if not operators:raise RuntimeError('Receipt has no operator_ids; inspect ledger before any further action.')
     results=[]
     over_cap_evidence=None
+    wallet_halt = False
     try:
         for op in operators:results.append(d._poll_operator(args.profile,args.region,op,args.timeout_sec))
         verified=verify() if verify else {}
         after=d._fetch_preflight(args.profile,args.region)
         before=getattr(args,'_before_preflight',None)
-        if before and before['balance']['credit_balance']-after['balance']['credit_balance']>getattr(args,'_estimated_credits',0):
+        wallet = None
+        if getattr(args, '_batch_wallet', None):
+            batch = d._ledger(Path(args.ledger), 'status', '--task-id', args.task_id)
+            wallet = deferred_wallet(batch['steps'], args.profile, after['balance']['credit_balance'])
+            wallet_halt = wallet['observed_net_decrease'] > wallet['submitted_credit_ceiling']
+            if wallet_halt:
+                halt_batch_wallet(d, args, wallet, dict(zip(operators, results)))
+        elif before and before['balance']['credit_balance']-after['balance']['credit_balance']>getattr(args,'_estimated_credits',0):
             over_cap_evidence={'operators':operators,'reason':'wallet_decrease_exceeds_reserved_credits',
                 'wallet_before':before['balance']['credit_balance'],'wallet_after':after['balance']['credit_balance'],
                 'observed_wallet_decrease':before['balance']['credit_balance']-after['balance']['credit_balance'],
                 'reserved_credits':getattr(args,'_estimated_credits',0),'actual_credit_debit':'not_attributed',
                 'browser_context':getattr(args,'_browser_context',None)}
             raise RuntimeError('Observed wallet decrease exceeds this reserved estimate; attribution is unclear, halt for review.')
-        commit(d,args,'success',{'operators':operators,'observed_after':after,'actual_credit_debit':'not_attributed',**verified})
+        evidence = {'operators':operators,'observed_after':after,'actual_credit_debit':'not_attributed',**verified}
+        if wallet:
+            evidence['wallet'] = wallet
+        commit(d,args,'success',evidence)
     except d.OperatorFailed as exc:
         commit(d,args,'failed',{'operators':operators,'reason':str(exc)})
         raise
@@ -165,7 +242,10 @@ def finish_operators(d,args,receipt,verify=None):
         args._keep_browser=True
         commit(d,args,'unknown',over_cap_evidence or {'operators':operators,'reason':'poll/readback uncertain; no retry','browser_context':getattr(args,'_browser_context',None)})
         raise
-    return {'ok':True,'receipt':receipt,'progress':results,'credits_used':None,'actual_credit_debit':'not_attributed',**verified}
+    result = {'ok':True,'receipt':receipt,'progress':results,'credits_used':None,'actual_credit_debit':'not_attributed',**verified}
+    if wallet_halt:
+        result['halted'] = True
+    return result
 
 def generate(d,args):
     args.hd_version=resolve_hd_version(getattr(args,'hd_version',None),getattr(args,'region','cn'))
@@ -183,6 +263,7 @@ def generate(d,args):
     if args.execute_spend:
         require_identity(args)
         if int(bal.get('credit_balance',0))<est.net_credits:raise RuntimeError('Insufficient Studio credits.')
+        check_queued_submission(d, args, bal.get('credit_balance'))
         args._before_preflight=pf;args._estimated_credits=est.net_credits
     session='tripo_generate_'+uuid.uuid4().hex[:12]
     call=lambda op,*a:d._opencli(args.profile,'browser',session,op,*a)
@@ -212,6 +293,9 @@ def generate(d,args):
         receipt=execute_ui(d,args,call,est,observed,target['ref'],'/v2/studio/operation/'+endpoints[args.mode],count,context)
     finally:
         if not getattr(args,'_keep_browser',False):d._opencli(args.profile,'browser',session,'close',check=False)
+    if getattr(args, 'submit_only', False):
+        return {'ok': True, 'state': 'submitted', 'step_key': args.step_key, 'receipt': receipt,
+                'estimate': est.to_dict()}
     result=finish_operators(d,args,receipt);result['estimate']=est.to_dict();return result
 
 def postprocess(d,args):
@@ -246,6 +330,9 @@ def postprocess(d,args):
     if not args.prepare_only and not args.execute_spend:return {'ok':True,'dry_run':True,'estimate':est.to_dict(),'preflight':pf}
     if args.execute_spend:
         require_identity(args)
+        check_queued_submission(d, args, bal.get('credit_balance'))
+        if getattr(args, 'submit_only', False) and (type(bal.get('credit_balance')) is not int or bal['credit_balance'] < est.net_credits):
+            raise RuntimeError('Insufficient Studio credits.')
         args._before_preflight=pf;args._estimated_credits=est.net_credits
     session='tripo_post_'+uuid.uuid4().hex[:12];call=lambda op,*a:d._opencli(args.profile,'browser',session,op,*a)
     try:
@@ -293,11 +380,16 @@ def postprocess(d,args):
         elif not observed.get('submit') or observed['submit'].get('disabled') is not False:
             raise RuntimeError('Inputs or submit control lost readiness before submit; no submit.')
         exact_price(observed['submit']['text'],est.net_credits,d._parse_submit_credits,observed['submit'].get('credit_prop'))
+        if getattr(args, 'submit_only', False):
+            d._verify_current_project(args.profile, args.region, args.project_id, args.source_operator_id)
         context={'session':session,'page':d._BROWSER_PAGES.get((args.profile,session)),'profile':args.profile}
         args._browser_context=context
         preview_before=ui.edit_preview_state() if args.operation=='texture-edit' else None
         uv_before=ui.uv_state() if args.operation=='smart-uv' else None
         receipt=execute_ui(d,args,call,est,observed,target['ref'],d.POSTPROCESS_CONFIG[args.operation]['endpoint_hint'],1,context)
+        if getattr(args, 'submit_only', False):
+            return {'ok': True, 'state': 'submitted', 'step_key': args.step_key, 'receipt': receipt,
+                    'estimate': est.to_dict()}
         def verify_preview():
             s=ui.wait_edit_state(lambda x:x.get('project_id')==args.project_id and x.get('source_operator_id')==preview_before.get('source_operator_id') and len(x['images'])>len(preview_before['images']) and x.get('selected_index')==0 and bool(x['images'][0].get('fingerprint')),'new preview rendered and selected',timeout=30)
             return {'result_kind':'preview_ready','asset_applied':False,'preview':{'project_id':args.project_id,'source_operator_id':s['source_operator_id'],'fingerprint':s['images'][0]['fingerprint'],'browser_context':context}}

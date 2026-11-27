@@ -2,7 +2,7 @@
 """
 Tripo Studio Web (studio.tripo3d.com) orchestrator driven via OpenCLI Browser Bridge
 with strict ledger reservation, dual credit verification, zero auto-retry on spend,
-and SHA256-verified export download into the explicitly configured runtime directory..
+and SHA256-verified export download into the explicitly configured runtime directory.
 """
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ DEFAULT_RUNTIME_DIR = Path(os.environ.get("TRIPO_STUDIO_RUNTIME_DIR", str(Path.c
 LEDGER_SCRIPT = Path(__file__).resolve().parent / "tripo_ledger.py"
 
 TERMINAL_FAILURE_STATUSES = {"failed", "expired", "cancelled", "banned", "unknown"}
+PENDING_OPERATOR_STATUSES = {"prepare", "queued", "pending", "running", "processing", "submitted", "created", "waiting", "in_progress", "init"}
+OPERATOR_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 USE_RESOURCE_BARRIER = True
 
 class OperatorFailed(RuntimeError):
@@ -293,6 +295,110 @@ def _fetch_preflight(profile: str, region: str) -> dict[str, Any]:
     return {"balance": bal, "quota": quota}
 
 
+def _verify_current_project(profile, region, project_id, source_operator_id):
+    rows = _extract_json(_opencli(profile, 'tripo-studio', 'project', project_id, '--region', region, '-f', 'json'))
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        raise RuntimeError('Could not read the current Studio project variant.')
+    row = rows[0]
+    if (row.get('project_id') != project_id or row.get('operator_id') != source_operator_id
+            or row.get('is_owner') is not True or row.get('status') != 'success'):
+        raise RuntimeError('The owned and completed current project variant does not match the requested source.')
+
+
+def _progress_snapshot(profile, region, operators):
+    snapshot = {}
+    for offset in range(0, len(operators), 16):
+        chunk = operators[offset:offset + 16]
+        rows = _extract_json(_opencli(profile, 'tripo-studio', 'progress', '--ids', ','.join(chunk),
+                                      '--region', region, '-f', 'json'))
+        if not isinstance(rows, list) or len(rows) != len(chunk):
+            raise RuntimeError('Incomplete progress readback. Keep the submitted steps and collect again.')
+        for row in rows:
+            if not isinstance(row, dict) or row.get('operator_id') not in chunk or row['operator_id'] in snapshot:
+                raise RuntimeError('Duplicate or unrelated progress identity. Keep the submitted steps and collect again.')
+            status = str(row.get('status', '')).lower()
+            if status not in PENDING_OPERATOR_STATUSES | TERMINAL_FAILURE_STATUSES | {'success'}:
+                raise RuntimeError('Unrecognized progress status. Keep the submitted steps and inspect the original job.')
+            data = {'operator_id': row['operator_id'], 'status': status}
+            if type(row.get('progress')) in {int, float}:
+                data['progress'] = row['progress']
+            snapshot[row['operator_id']] = data
+    return snapshot
+
+
+def cmd_collect(args):
+    from tripo_actions import commit, deferred_wallet, halt_batch_wallet
+    from tripo_ledger import _ledger_lock
+
+    with _ledger_lock(Path(args.runtime_dir) / 'studio-browser.lock'):
+        state = _ledger(Path(args.ledger), 'status', '--task-id', args.task_id)
+        if state.get('region') != args.region:
+            raise RuntimeError('Task ledger region differs from the requested Studio region.')
+        if state.get('studio_profile') != args.profile:
+            raise RuntimeError('Collect with the Studio profile bound at init-task.')
+        steps = state['steps']
+        receipts = {}
+        operators = []
+        pending_manual = {}
+        for key, step in steps.items():
+            metadata = step.get('metadata') or {}
+            if step.get('status') != 'submitted' or 'deferred_profile' not in metadata:
+                if step.get('status') in {'reserved', 'submitting', 'submitted', 'unknown'}:
+                    pending_manual[key] = step['status']
+                continue
+            if metadata['deferred_profile'] != args.profile:
+                raise RuntimeError('Collect with the original browser profile.')
+            receipt = step.get('evidence') or {}
+            ids = receipt.get('operator_ids')
+            projects = receipt.get('project_ids')
+            if (not isinstance(ids, list) or not ids or len(ids) != metadata.get('expected_results')
+                    or any(not isinstance(item, str) or not OPERATOR_ID.fullmatch(item) for item in ids)
+                    or len(ids) != len(set(ids)) or any(item in operators for item in ids)
+                    or ids[0] != step.get('operator_id') or not isinstance(projects, list) or not projects
+                    or any(not isinstance(item, str) or not OPERATOR_ID.fullmatch(item) for item in projects)
+                    or projects[0] != step.get('project_id')):
+                raise RuntimeError('Stored receipt identities are incomplete or ambiguous. Inspect the ledger before proceeding.')
+            if metadata.get('project_id') and projects != [metadata['project_id']]:
+                raise RuntimeError('Stored postprocess receipt does not match the requested project.')
+            receipts[key] = receipt
+            operators.extend(ids)
+        if not operators:
+            return {'ok': True, 'task_id': args.task_id, 'steps': {}, 'has_pending': bool(pending_manual),
+                    'requires_other_action': pending_manual, 'halted': state['halted']}
+
+        _ensure_daemon(args.profile)
+        progress = _progress_snapshot(args.profile, args.region, operators)
+        wallet = deferred_wallet(steps, args.profile, _fetch_preflight(args.profile, args.region)['balance']['credit_balance'])
+        if wallet['observed_net_decrease'] > wallet['submitted_credit_ceiling']:
+            halt_batch_wallet(sys.modules[__name__], args, wallet, progress)
+            raise RuntimeError('Batch wallet decrease exceeds its recorded submissions. Reconcile the batch before spending.')
+
+        results = {}
+        halted = state['halted']
+        for key, receipt in receipts.items():
+            args.step_key = key
+            rows = [progress[item] for item in receipt['operator_ids']]
+            statuses = {row['status'] for row in rows}
+            outcome = 'submitted'
+            if not statuses & PENDING_OPERATOR_STATUSES:
+                if 'unknown' in statuses:
+                    outcome = 'unknown'
+                elif statuses & TERMINAL_FAILURE_STATUSES:
+                    outcome = 'failed'
+                elif statuses == {'success'}:
+                    outcome = 'success'
+            if outcome != 'submitted':
+                settled = commit(sys.modules[__name__], args, outcome,
+                                 {**receipt, 'progress': rows, 'wallet': wallet, 'actual_credit_debit': 'not_attributed'})
+                halted = halted or settled['halted']
+            if outcome == 'unknown':
+                pending_manual[key] = outcome
+            results[key] = {'state': outcome, 'project_ids': receipt['project_ids'], 'progress': rows}
+        return {'ok': True, 'task_id': args.task_id, 'steps': results, 'halted': halted, 'wallet': wallet,
+                'requires_other_action': pending_manual,
+                'has_pending': bool(pending_manual) or any(row['state'] == 'submitted' for row in results.values())}
+
+
 def cmd_preflight(args: argparse.Namespace) -> dict[str, Any]:
     _ensure_daemon(args.profile)
     data = _fetch_preflight(args.profile, args.region)
@@ -358,6 +464,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre = sub.add_parser("preflight", help="Check Studio balance, quota, and ledger status (0 spend)")
     p_pre.add_argument("--task-id", default="")
 
+    p_collect = sub.add_parser('collect', help='Read and settle one snapshot of deferred CN generation and postprocessing')
+    p_collect.add_argument('--task-id', required=True)
+
     p_gen = sub.add_parser("generate", help="Run dry-run estimate or execute Tripo Studio generation")
     p_gen.add_argument("--mode", required=True, choices=["single", "multiview", "batch", "text"])
     p_gen.add_argument("--tier", default="hd", choices=["hd", "smartmesh"])
@@ -392,6 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--step-key", default="")
     p_gen.add_argument("--timeout-sec", type=int, default=600)
     p_gen.add_argument("--execute-spend", action="store_true")
+    p_gen.add_argument('--submit-only', action='store_true', help='CN only: save the verified receipt and return without waiting')
     p_gen.add_argument('--prepare-only',action='store_true',help='Configure and verify real UI; never submit')
     p_gen.add_argument('--prepare-upload',action='store_true',help='Explicitly upload input images during --prepare-only')
 
@@ -416,6 +526,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument("--step-key", default="")
     p_post.add_argument("--timeout-sec", type=int, default=600)
     p_post.add_argument("--execute-spend", action="store_true")
+    p_post.add_argument('--submit-only', action='store_true', help='CN only: save the verified receipt and return without waiting')
+    p_post.add_argument('--source-operator-id', default='', help='Required current successful source for a deferred postprocess')
     p_post.add_argument('--prepare-only',action='store_true',help='Verify postprocess UI without submitting')
     p_post.add_argument('--prepare-upload',action='store_true')
     p_post.add_argument('--face-limit',type=int,default=10000)
@@ -442,6 +554,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("--allow-nonowner-spend", action="store_true")
     p_exp.add_argument('--step-key',default='')
     p_exp.add_argument('--execute-spend',action='store_true',help='Explicitly execute the budgeted export once')
+    p_exp.add_argument('--submit-only', action='store_true', help='CN only: record one owned export without waiting for the file')
+    p_exp.add_argument('--source-operator-id', default='', help='Current approved source variant for deferred export and its recovery')
     p_exp.add_argument('--download-job',default='',help='Check one existing download job; never re-export')
     p_exp.add_argument('--resume-export',action='store_true',help='Resolve a previously recorded export operator; never create another export')
 
@@ -457,8 +571,26 @@ def main() -> int:
     args = parser.parse_args()
     if getattr(args,'prepare_only',False) and getattr(args,'execute_spend',False):parser.error('--prepare-only and --execute-spend are mutually exclusive')
     if getattr(args,'prepare_upload',False) and not getattr(args,'prepare_only',False):parser.error('--prepare-upload requires --prepare-only')
+    deferred = getattr(args, 'submit_only', False) or args.subcmd == 'collect'
+    if deferred:
+        if args.region != 'cn':
+            parser.error('Deferred Studio operations currently support the CN region only')
+        if (Path(args.runtime_dir).resolve() != DEFAULT_RUNTIME_DIR.resolve()
+                or Path(args.ledger).resolve() != (DEFAULT_RUNTIME_DIR / 'ledger.json').resolve()):
+            parser.error('Deferred Studio operations use the shared Studio runtime and ledger')
+    if getattr(args, 'submit_only', False) and not args.execute_spend:
+        parser.error('--submit-only requires --execute-spend')
+    if args.subcmd == 'postprocess':
+        from tripo_actions import DEFERRED_POSTPROCESS
+        if args.submit_only and (args.operation not in DEFERRED_POSTPROCESS or args.animation or args.apply_preview_step):
+            parser.error('This operation needs its original Studio page or extra readback. Use the synchronous path.')
+        if args.submit_only != bool(args.source_operator_id):
+            parser.error('Deferred postprocessing requires --submit-only and --source-operator-id together')
+        if args.source_operator_id and not OPERATOR_ID.fullmatch(args.source_operator_id):
+            parser.error('Invalid source operator identity')
     dispatch = {
         "preflight": cmd_preflight,
+        "collect": cmd_collect,
         "generate": cmd_generate,
         "postprocess": cmd_postprocess,
         "export": cmd_export,

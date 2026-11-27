@@ -2,7 +2,7 @@
 
 通过真实浏览器操作 Tripo Studio 的自研 OpenCLI 适配器、Python 工作流和配套代理技能。支持生成、后处理、受预算约束的导出，以及与官方 Tripo Bridge 的 Blender 交接。此仓库同时提供技能包与 skills-only Codex 插件包；没有另造一个 Blender 接收器。
 
-**0.2.0 是受限预览版。** 已有 Windows、OpenCLI 1.8.7、Blender 5.2.1 / 5.3.0 的代表性实测；网页构建变化可能使操作被安全拒绝。HD 模式按站点自动对齐实装最新模型（国际站默认 **H3.5 Preview `v3.5-20261108`**，国内站当前默认 **H3.1 `v3.1-20260211`**），Smart Mesh 默认 **P2.0 (`Nexus-v2.0-20260801`)**。服务成功、导入成功和模型艺术质量分别判断。项目与 Tripo、OpenCLI、Blender 官方无隶属关系。
+**0.3.0 是受限预览版。** 已有 Windows、OpenCLI 1.8.7、Blender 5.2.1 / 5.3.0 的代表性实测。国区生成、贴图和自有 FBX 导出实测支持短提交和按回执续接。网页更新后需重新核对操作。HD 模式按站点选择已实装模型，国际站默认 **H3.5 Preview `v3.5-20261108`**，国内站当前默认 **H3.1 `v3.1-20260211`**。Smart Mesh 默认 **P2.0 (`Nexus-v2.0-20260801`)**。项目与 Tripo、OpenCLI、Blender 官方无隶属关系。
 
 ## 内容
 
@@ -15,7 +15,7 @@
 
 ## 安装与开始
 
-需要已有 Python 3.12+、Node.js 20+、OpenCLI **1.8.7** 和已登录的 Browser Bridge。磁盘交接另需已有 Blender 5.2.x、PowerShell 7（`pwsh`在PATH）；官方 Tripo Bridge、自有兼容 smart-download 引擎及 blenderctl 仅为对应路径的外部依赖。安装包不包含这些程序或任何账号、模型、运行账本。
+需要已有 Python 3.12+、Node.js 20+、OpenCLI **1.8.7** 和已登录的 Browser Bridge。磁盘交接另需兼容的 Blender、blenderctl 与 PowerShell 7（`pwsh` 在 PATH）。官方 Tripo Bridge 和兼容的 smart-download 引擎按所用流程另行配置。安装包只包含项目代码和文档。
 
 1. 从 [Releases](https://github.com/tsist/tripo-studio-opencli/releases) 下载技能包或插件包，或者克隆源码。
 2. 将技能目录装入代理自己的技能根，或按客户端的本地插件流程加载整个插件包。GitHub 发布不等于应用目录上架或自动安装。
@@ -44,7 +44,7 @@ python skills/tripo-studio-opencli/scripts/tripo_studio_driver.py generate --mod
 - 一次本地语义检查中，原15对象在5个 Scene/ViewLayer、指定保存帧的作者状态及求值世界几何/拓扑精确保持。旧缓存世界矩阵约4.371e-8的严格失败仍保留，不能用新语义结果改签旧测试。
 - **无可核价格上界的重绘预览保存自动执行禁用**，提高本地 cap 不能解锁。WebGL 笔刷人工；3MF仅XML检查；Max预设仅静态检查。
 
-完整说明见 [能力与验证](docs/VERIFICATION.md) 与 [费用及安全](docs/SECURITY.md)。发布适配仅更改路径/配置和文档，未重新进行云端付费验证。离线测试不替代云端正例。
+当前版本的国区验证范围和操作步骤见 [能力与验证](docs/VERIFICATION.md)、[国区并发与对账](skills/tripo-studio-opencli/references/studio-concurrent-production.md) 与 [费用及安全](docs/SECURITY.md)。海外画布的设置与实测边界见 [画布手册](skills/tripo-studio-opencli/references/agentic-canvas.md)。
 
 ## 本地测试
 

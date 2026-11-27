@@ -434,6 +434,8 @@ def cmd_init_task(args: argparse.Namespace) -> dict[str, Any]:
             "halt_history": [],
             "steps": {},
         }
+        if args.profile:
+            task['studio_profile'] = args.profile
         data["schema_version"] = SCHEMA_VERSION
         data["tasks"][args.task_id] = task
         _save_ledger_atomic(path, data)
@@ -446,6 +448,22 @@ def cmd_reserve(args: argparse.Namespace) -> dict[str, Any]:
     with _ledger_lock(path):
         data = _load_ledger(path)
         task = _require_task(data, args.task_id)
+        meta = metadata or {}
+        profile = meta.get('studio_profile')
+        deferred = meta.get('deferred_profile') or meta.get('deferred_export')
+        bound_profile = task.get('studio_profile')
+        if (bound_profile and bound_profile != profile) or (deferred and not bound_profile):
+            raise RuntimeError('Deferred Studio spending requires the original browser profile bound at init-task.')
+        if profile:
+            for other_id, other in data['tasks'].items():
+                if other_id == args.task_id or other.get('region', 'cn') != task.get('region', 'cn'):
+                    continue
+                for existing_step in _steps_dict(other).values():
+                    existing_meta = existing_step.get('metadata') or {}
+                    if (existing_meta.get('studio_profile') == profile
+                            and (deferred or existing_meta.get('deferred_profile') or existing_meta.get('deferred_export'))
+                            and _status(existing_step) in {'reserved', 'submitting', 'submitted', 'unknown'}):
+                        raise RuntimeError(f"Studio profile already has another active spending batch: '{other_id}'.")
 
         if task.get("halted"):
             raise RuntimeError(
@@ -738,6 +756,22 @@ def cmd_commit(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def cmd_halt(args: argparse.Namespace) -> dict[str, Any]:
+    path = Path(args.ledger)
+    evidence = _parse_json_object(args.evidence_json, '--evidence-json')
+    reason = args.reason.strip()
+    if not reason or not evidence:
+        raise ValueError('A task-level halt requires a reason and evidence.')
+    with _ledger_lock(path):
+        data = _load_ledger(path)
+        task = _require_task(data, args.task_id)
+        _halt(task, reason)
+        task['halt_history'][-1]['evidence'] = evidence
+        task['updated_at'] = _now_iso()
+        _save_ledger_atomic(path, data)
+    return {'ok': True, 'action': 'halt', 'task_id': args.task_id, 'halted': True}
+
+
 def cmd_clear_halt(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.ledger)
     with _ledger_lock(path):
@@ -795,7 +829,8 @@ def cmd_clear_halt(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_status(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.ledger)
-    data = _load_ledger(path)
+    with _ledger_lock(path):
+        data = _load_ledger(path)
     task = _require_task(data, args.task_id)
     _recompute_totals(task)
     cap = int(task.get("budget_cap", 0))
@@ -807,12 +842,15 @@ def cmd_status(args: argparse.Namespace) -> dict[str, Any]:
         "task_id": args.task_id,
         "schema_version": _task_schema(task),
         "region": task.get('region','cn'),
+        "studio_profile": task.get('studio_profile'),
         "budget_cap": cap,
         "spent_credits": task["spent_credits"],
         "reserved_credits": task["reserved_credits"],
         "remaining_budget": cap - task["spent_credits"] - task["reserved_credits"],
         "halted": bool(task.get("halted", False)),
         "halt_reason": task.get("halt_reason", ""),
+        "halt_evidence": next((item['evidence'] for item in reversed(task.get('halt_history') or [])
+                               if isinstance(item, dict) and 'evidence' in item), None),
         "unresolved_unknown": unknown_steps,
         "submitting": submitting_steps,
         "resource_usage": _resource_summary(task),
@@ -873,6 +911,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--task-id", required=True)
     p_init.add_argument("--budget-cap", required=True, type=int)
     p_init.add_argument("--region", default="cn", choices=["cn", "global"])
+    p_init.add_argument('--profile', default='', help='Bind the OpenCLI profile for an asynchronous Studio batch')
     p_init.add_argument("--note", default="")
     p_init.add_argument("--force", action="store_true")
     p_init.add_argument("--max-submissions", type=int, default=1)
@@ -906,6 +945,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_com.add_argument("--actual-credits", type=int, default=None)
     p_com.add_argument("--evidence-json", default=None)
     p_com.add_argument("--reconcile-unknown", action="store_true")
+
+    p_halt = sub.add_parser('halt', help='Record a batch-level stop without changing any operation')
+    p_halt.add_argument('--task-id', required=True)
+    p_halt.add_argument('--reason', required=True)
+    p_halt.add_argument('--evidence-json', required=True)
 
     p_clr = sub.add_parser("clear-halt", help="Clear halt flag ONLY after human intervention")
     p_clr.add_argument("--task-id", required=True)
@@ -957,6 +1001,7 @@ def main() -> int:
         "init-task": cmd_init_task,
         "reserve": cmd_reserve,
         "commit": cmd_commit,
+        "halt": cmd_halt,
         "clear-halt": cmd_clear_halt,
         "status": cmd_status,
         "estimate": cmd_estimate,

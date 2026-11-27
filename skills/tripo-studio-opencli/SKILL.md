@@ -2,7 +2,7 @@
 name: tripo-studio-opencli
 description: 通过 OpenCLI 驱动 Tripo Studio 网页端完成余额预检、预算锁账、三维模型生成、后处理、本地导出与官方 Bridge 到件提取。接到复杂有机体、雕塑造型的角色或高面数主体，需要先用 Studio 会员算力出候选再交给 Blender 建模部门时用它。
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # Tripo Studio 网页生成与交接
@@ -10,6 +10,9 @@ metadata:
 本技能属于[建模部门](https://github.com/tsist/blender-ai-workflow/blob/main/skills/blender-work-methodology/references/departments/modeling.md)，负责通过本机已登录的 Chrome 与 OpenCLI 操作 Tripo Studio 网页端，完成算力核对、模型生成、网页后处理、导出归档和官方 Bridge 到件提取，再把带齐清单与 SHA-256 的候选交给 [blender-modeling-workflow](https://github.com/tsist/blender-modeling-workflow/blob/main/skills/blender-modeling-workflow/SKILL.md) 导入和审核。需要走独立 API 钱包生成时，改由建模流程里的独立接口路线处理。
 
 ## 怎么做
+
+- **国区多资产**。同配方优先一次批量生成。独立配方、分批到件或需要按原回执恢复时，用短提交和批量回读。贴图、导出按各项目的已验源变体推进。 [国区并发与对账](references/studio-concurrent-production.md)
+- **Agentic Canvas**。按地区核对入口和权益，再在私有模板副本上确认节点设置及导出。 [画布操作与接入](references/agentic-canvas.md)
 
 ### 第一步：查当前入口，做零消耗预检
 
@@ -87,7 +90,7 @@ python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
     --execute-spend
   ```
   导出或下载中途中断时，先跑 `--resume-export` 检查本机已有下载作业；文件下完后用 `--download-job <job_id>` 核对校验并补齐 `manifest.json`。
-- **官方 Studio Bridge 现场发送与提取**：先确认目标 Blender 进程里官方 Bridge 已连接且只有一个活动接收器，在独占空场景存好工作副本和检查点，再在原模型标签页用 `bridge --execute-spend` 单次发送。收件后运行 `bridge-handoff` 提取独立 `candidate.blend` 与 `handoff.json`。细则见 [官方 Bridge 交接](references/studio-blender-bridge.md)。
+- **官方 Studio Bridge 现场发送与提取**。这两个工作区命令需要对应的 Blender 5.3 工作区驱动。公开驱动可通过 `export` 和本地交接脚本验收文件。能在本机工作区调出 `bridge` 与 `bridge-handoff` 时，按文档使用单一接收器和原模型标签页。 [官方 Bridge 交接](references/studio-blender-bridge.md)
 
 ### 第六步：本地初步导入并核对
 
@@ -123,4 +126,6 @@ python scripts/tripo_studio_driver.py --profile <your-profile> postprocess `
 - [官方 Studio Bridge 发送与到件提取](references/studio-blender-bridge.md)
 - [本地归档与 Blender 导入交接](references/local-handoff.md)
 - [故障定位、中断恢复与人工边界](references/troubleshooting-and-recovery.md)
+- [国区多资产并发与对账](references/studio-concurrent-production.md)
+- [Agentic Canvas 操作与接入](references/agentic-canvas.md)
 - [公共路由、脚本清册与验证证据索引](references/sources.md)

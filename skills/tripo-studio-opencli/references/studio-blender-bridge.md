@@ -2,6 +2,8 @@
 
 官方 Studio Bridge 把网页里选定的自有静态模型直接发进正在运行的 Blender 接收窗口，再用 `bridge-handoff` 提取成干净的独立工作副本交给建模部门。通过公共目录查当前工作区入口与宿主路径，按下面顺序操作。
 
+本页的 `bridge` 和 `bridge-handoff` 命令需要提供这两个入口的 Blender 5.3 工作区驱动。公开 0.3.0 随包提供桥接模块，文件交付用公开驱动的 `export` 及 [Blender 本地交接](local-handoff.md)。
+
 ## 查入口与做离线计划
 
 先用 `discover` 取出工作区维护版的 `bridge` 启动器，跑一次离线计划核对任务、步骤和项目编号，全程零消耗。

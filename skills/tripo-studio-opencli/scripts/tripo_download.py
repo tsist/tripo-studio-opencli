@@ -885,6 +885,8 @@ class SmartDownloadBridge:
         destination: Path | str,
         expected_bytes: int | None = None,
         sha256: str | None = None,
+        *,
+        backend: str | None = None,
     ) -> dict[str, Any]:
         """Start one background download and return the engine's compact job.
 
@@ -904,6 +906,8 @@ class SmartDownloadBridge:
             if not isinstance(sha256, str) or not _SHA256_RE.fullmatch(sha256):
                 raise SmartDownloadError("sha256 must contain exactly 64 hexadecimal characters.")
             sha256 = sha256.lower()
+        if backend is not None and backend not in ("aria2", "curl"):
+            raise SmartDownloadError("backend must match aria2 or curl.")
 
         payload = {
             "url": validated_url,
@@ -913,6 +917,8 @@ class SmartDownloadBridge:
             "sha256": sha256,
             "connections": 4,
         }
+        if backend is not None:
+            payload["backend"] = backend
         stdin_payload = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
         data = self._call(
             ["-Action", "Download"],

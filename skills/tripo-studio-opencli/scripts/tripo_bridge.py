@@ -259,7 +259,7 @@ def _send(driver, args, context, receiver, page_record):
     _node_command(driver)
     driver._ensure_daemon(args.profile)
     source = _source(driver, args)
-    meta = {"bridge_plan": _plan(args.project_id), "bridge_context": context,
+    meta = {"studio_profile": args.profile, "bridge_plan": _plan(args.project_id), "bridge_context": context,
             "bridge_receiver": receiver, "bridge_receiver_baseline": baseline, "bridge_source": source}
     receipt = _receipt_file(args)
     receipt.parent.mkdir(parents=True, exist_ok=True)

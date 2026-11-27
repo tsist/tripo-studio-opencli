@@ -4,7 +4,7 @@
 
 ## 本地任务归档布局
 
-运行 `tripo_studio_driver.py export` 后，导出的模型默认保存在 `<PROJECT_ROOT>/runtime\tripo-studio\<task_id>\` 下。脚本在下载晋升阶段自动执行三项核验并写入 `<task_dir>\manifest.json`：
+导出文件保存在 `TRIPO_STUDIO_RUNTIME_DIR` 下的任务目录，默认运行目录为当前目录中的 `.tripo-studio`。指定源变体的导出文件放在独立步骤子目录。下载完成后，脚本核验本地文件并在任务目录写入 `<step_key>.download.manifest.json`。
 
 1. 计算流式小写 SHA-256 指纹。
 2. 核对文件魔数头（`.glb` 为 `glTF`，二进制 `.fbx` 为 `Kaydara FBX Binary`，压缩包 `.zip` 为 `PK`）。
@@ -14,16 +14,16 @@
 
 ## 双路径导入脚本（`scripts/blender_handoff.ps1`）
 
-使用工作区交接脚本把落盘的静态 GLB 或 FBX 导入当前项目宿主并生成初步核验报告：
+先按安装指南设置 `TRIPO_BLENDERCTL` 和 `TRIPO_BLENDER_EXE`，然后从仓库根目录运行交接脚本。
 
 ```powershell
-pwsh -NoProfile -File "./.agents/skills\tripo-studio-opencli\scripts\blender_handoff.ps1" `
+pwsh -NoProfile -File "./skills/tripo-studio-opencli/scripts/blender_handoff.ps1" `
   -InputFile "<已落盘模型路径>" `
-  -TaskDir "<PROJECT_ROOT>/runtime\tripo-studio\<task_id>" `
+  -TaskDir "<new-handoff-directory>" `
   -ProjectId "<project_uuid>" `
   -Mode auto `
   -FrontAxis +X `
-  -DownloadManifest "<task_dir>\manifest.json" `
+  -DownloadManifest "<task-dir>/<step-key>.download.manifest.json" `
   -ExpectedDownloadManifestSha256 "<manifest_sha256>"
 ```
 
@@ -33,9 +33,9 @@ pwsh -NoProfile -File "./.agents/skills\tripo-studio-opencli\scripts\blender_han
 
 - 在 `<task_dir>\handoff\` 下生成 `import_local` 参数文件，写入输入文件、SHA-256、Studio 出处和默认三视图预览参数（跳过预览可加 `-SkipPreview`）。
 - 调用公共 `blenderctl.ps1 modeling run` 完成导入、贴图打包、保存和独立冷重开检查，再对产出的候选 `.blend` 跑一次 `blenderctl.ps1 inspect`。
-- 传入 `-DownloadManifest` 与 `-ExpectedDownloadManifestSha256` 后，脚本会先核验清单与原 GLB 一致，并把项目、导出操作和下载作业一并写进交接报告，方便下游直接跑 `modeling review-candidate` 和 `modeling adopt-candidate`。
+- 传入 `-DownloadManifest` 与 `-ExpectedDownloadManifestSha256` 后，脚本先核验清单与原 GLB 或二进制 FBX 的 SHA-256 和字节数，并在交接报告中保留项目、导出操作、下载作业及可用的源变体。
 
-### 路径 B：Smart Mesh 四边面或带动作 FBX（`-Mode fbx` 或 `.fbx`）
+### 路径 B：静态或带动作 FBX（`-Mode fbx` 或 `.fbx`）
 
 - 调用独立后台进程运行 `scripts/fbx_import_headless.py`，关闭递归全盘搜图（`use_image_search=False`）以防耗时误找外部目录，同时保留正常相对路径与内嵌贴图加载并如实报告缺图。
 - 原样保留四边面拓扑（统计 `overall_quad_ratio`）、骨架层级、顶点权重组、打包贴图（`pack_all()`）与动作帧域，写入 Studio 出处元数据并另存未压缩的 `<stem>_fbx.blend`。

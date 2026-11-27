@@ -316,6 +316,15 @@ try {
             if ($sha) {
                 $engineParameters.Sha256 = $sha
             }
+            $backendValue = Get-PayloadValue $payload 'backend'
+            if ($null -ne $backendValue) {
+                if ($backendValue -isnot [string]) { throw "backend must match aria2 or curl." }
+                switch -CaseSensitive ($backendValue) {
+                    'aria2' { $engineParameters.Backend = 'Aria2' }
+                    'curl' { $engineParameters.Backend = 'Curl' }
+                    default { throw "backend must match aria2 or curl." }
+                }
+            }
 
             $job = Invoke-Engine $engineParameters
             Write-JsonResult (Protect-Result $job)
