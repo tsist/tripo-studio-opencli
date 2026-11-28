@@ -9,6 +9,13 @@ metadata:
 
 本技能属于[建模部门](https://github.com/tsist/blender-ai-workflow/blob/main/skills/blender-work-methodology/references/departments/modeling.md)，负责通过本机已登录的 Chrome 与 OpenCLI 操作 Tripo Studio 网页端，完成算力核对、模型生成、网页后处理、导出归档和官方 Bridge 到件提取，再把带齐清单与 SHA-256 的候选交给 [blender-modeling-workflow](https://github.com/tsist/blender-modeling-workflow/blob/main/skills/blender-modeling-workflow/SKILL.md) 导入和审核。需要走独立 API 钱包生成时，改由建模流程里的独立接口路线处理。
 
+## 高模禁止直接导出
+
+- 高细节原模只作为烘焙源。所有高模必须先做 Studio 智能重拓扑，再以具备合格 UV 的低模为目标做高低模投射烘焙。按镜头距离、轮廓和细枝等结构定目标面数，逐件核对实际面数和源、目标变体。导出、本地下载及 Bridge 发送一律选择低模变体。
+- 正式交付必须包含实际投射得到的烘焙贴图，至少带切线空间法线（OpenGL +Y、Non-Color）。按用途交付高度、AO 或曲率等数据图。Base Color 等外观贴图可按任务需要省略。Studio 的自动重绘或 PBR 生成无法证明完成了高低模投射。
+- 优先以 Studio 可核验的高低模烘焙结果配套导出。若 Studio 无法使用指定的烘焙源，仅在已有合法本地高模时，可将低模带到 Blender 通过 [blender-material-authoring](https://github.com/tsist/blender-material-workflow/blob/main/skills/blender-material-authoring/SKILL.md) 投射，并随低模交付贴图。已有本地源缺失且 Studio 无法烘焙时，记录阻塞，高模继续留在 Studio。
+- 放行前冷重开低模与贴图，核对低模 UV、色彩空间、关联路径和实际着色，并在同机位检查轮廓与贴图接缝。记录高低模身份、面数、烘焙通道与产物指纹。
+
 ## 怎么做
 
 - **国区多资产**。同配方优先一次批量生成。独立配方、分批到件或需要按原回执恢复时，用短提交和批量回读。贴图、导出按各项目的已验源变体推进。 [国区并发与对账](references/studio-concurrent-production.md)
